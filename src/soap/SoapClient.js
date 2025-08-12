@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import xmlFormatter from 'xml-formatter';
 import winston from 'winston';
+import { v4 as uuidv4 } from 'uuid';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,6 +87,9 @@ export class TwintSoapClient {
 
       this.#client = await soap.createClientAsync(wsdlPath, options);
       
+      // Add SOAP headers for every request
+      this.#addRequestHeaders();
+      
       // Add request/response logging if debug is enabled
       if (process.env.SOAP_DEBUG === 'true') {
         this.#addLogging();
@@ -115,6 +119,40 @@ export class TwintSoapClient {
       }
       throw error;
     }
+  }
+
+  /**
+   * Add required SOAP headers for TWINT
+   * @private
+   */
+  #addRequestHeaders() {
+    // Create header with MessageId, ClientSoftwareName, and ClientSoftwareVersion
+    const createHeader = () => {
+      const messageId = uuidv4();
+      const header = {
+        RequestHeaderElement: {
+          MessageId: messageId,
+          ClientSoftwareName: 'TWINT PHP SDK',
+          ClientSoftwareVersion: '1.6.2',
+          attributes: {
+            xmlns: 'http://service.twint.ch/header/types/v8_6'
+          }
+        }
+      };
+      return header;
+    };
+    
+    // Add header to each request
+    this.#client.addSoapHeader(createHeader());
+    
+    // Hook into the request to regenerate MessageId for each call
+    const originalRequest = this.#client._invoke.bind(this.#client);
+    this.#client._invoke = function(...args) {
+      // Clear existing headers and add new ones with fresh MessageId
+      this.clearSoapHeaders();
+      this.addSoapHeader(createHeader());
+      return originalRequest.apply(this, args);
+    };
   }
 
   /**

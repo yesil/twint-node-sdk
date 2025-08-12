@@ -9,23 +9,19 @@ import { FiledMerchantTransactionReference } from '../values/MerchantTransaction
 export class TwintClient {
   #soapClient;
   #storeUuid;
-  #cashRegisterId;
-  #enrolledCashRegisters = new Set();
 
   /**
    * @param {Object} config
    * @param {import('../certificates/Certificate.js').CertificateContainer} config.certificate
    * @param {string|import('../values/Uuid.js').StoreUuid} config.storeUuid
    * @param {import('../values/Environment.js').Environment} config.environment
-   * @param {string} [config.cashRegisterId]
    * @param {string} [config.version='v8.6']
    */
   constructor(config) {
-    const { certificate, storeUuid, environment, cashRegisterId, version = 'v8.6' } = config;
+    const { certificate, storeUuid, environment, version = 'v8.6' } = config;
 
     this.#soapClient = new TwintSoapClient(certificate, environment, version);
     this.#storeUuid = typeof storeUuid === 'string' ? StoreUuid.fromString(storeUuid) : storeUuid;
-    this.#cashRegisterId = cashRegisterId || `SDK-${this.#storeUuid.toString().substring(0, 8)}`;
   }
 
   /**
@@ -37,7 +33,6 @@ export class TwintClient {
       const request = {
         MerchantInformation: {
           MerchantUuid: this.#storeUuid.toString(),
-          CashRegisterId: this.#cashRegisterId || '',
         },
       };
 
@@ -57,36 +52,6 @@ export class TwintClient {
   }
 
   /**
-   * Enroll cash register if not already enrolled
-   * @private
-   */
-  async #enrollCashRegister() {
-    if (this.#enrolledCashRegisters.has(this.#cashRegisterId)) {
-      return;
-    }
-
-    try {
-      const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-          CashRegisterId: this.#cashRegisterId,
-        },
-        CashRegisterType: 'EPOS',
-        ForceEnrollment: true,
-      };
-
-      await this.#soapClient.enrollCashRegister(request);
-      this.#enrolledCashRegisters.add(this.#cashRegisterId);
-    } catch (error) {
-      // Cash register might already be enrolled
-      if (!error.message?.includes('ALREADY_ENROLLED')) {
-        throw new Error(`Failed to enroll cash register: ${error.message}`);
-      }
-      this.#enrolledCashRegisters.add(this.#cashRegisterId);
-    }
-  }
-
-  /**
    * Start a new payment order
    * @param {Object} params
    * @param {string|import('../values/MerchantTransactionReference.js').UnfiledMerchantTransactionReference} params.reference
@@ -95,15 +60,12 @@ export class TwintClient {
    * @returns {Promise<Object>}
    */
   async startOrder({ reference, amount, confirmationNeeded = true }) {
-    await this.#enrollCashRegister();
-
     try {
       const merchantRef = typeof reference === 'string' ? reference : reference.value;
 
       const request = {
         MerchantInformation: {
           MerchantUuid: this.#storeUuid.toString(),
-          CashRegisterId: this.#cashRegisterId,
         },
         Order: {
           RequestedAmount: {
@@ -142,8 +104,6 @@ export class TwintClient {
    * @returns {Promise<Object>}
    */
   async monitorOrder(orderIdOrReference) {
-    await this.#enrollCashRegister();
-
     try {
       const isUuid = orderIdOrReference
         .toString()
@@ -152,7 +112,6 @@ export class TwintClient {
       const request = {
         MerchantInformation: {
           MerchantUuid: this.#storeUuid.toString(),
-          CashRegisterId: this.#cashRegisterId,
         },
         WaitForResponse: false,
       };
@@ -196,7 +155,6 @@ export class TwintClient {
       const request = {
         MerchantInformation: {
           MerchantUuid: this.#storeUuid.toString(),
-          CashRegisterId: this.#cashRegisterId,
         },
         OrderUuid: orderId.toString(),
         RequestedAmount: {
@@ -229,7 +187,6 @@ export class TwintClient {
       const request = {
         MerchantInformation: {
           MerchantUuid: this.#storeUuid.toString(),
-          CashRegisterId: this.#cashRegisterId,
         },
         OrderUuid: orderId.toString(),
         Reason: 'PAYMENT_ABORT',
@@ -258,8 +215,6 @@ export class TwintClient {
    * @returns {Promise<Object>}
    */
   async reverseOrder({ reversalReference, originalOrderId, amount, reason = 'REFUND' }) {
-    await this.#enrollCashRegister();
-
     try {
       const merchantRef =
         typeof reversalReference === 'string' ? reversalReference : reversalReference.value;
@@ -267,7 +222,6 @@ export class TwintClient {
       const request = {
         MerchantInformation: {
           MerchantUuid: this.#storeUuid.toString(),
-          CashRegisterId: this.#cashRegisterId,
         },
         Order: {
           RequestedAmount: {

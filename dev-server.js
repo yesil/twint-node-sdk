@@ -90,7 +90,6 @@ async function initializeTwintClient() {
       certificate,
       storeUuid: process.env.TWINT_STORE_UUID,
       environment,
-      cashRegisterId: process.env.TWINT_CASH_REGISTER_ID,
     });
 
     logger.info('TWINT client initialized successfully', {

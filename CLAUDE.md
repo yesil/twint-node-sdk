@@ -25,7 +25,6 @@ This is a **pure Node.js ES modules** implementation of the TWINT payment SDK fo
 ### 1. Main Client (`src/client/TwintClient.js`)
 - Entry point for all TWINT operations
 - Handles authentication via certificates
-- Manages cash register enrollment
 - Methods: `startOrder()`, `monitorOrder()`, `confirmOrder()`, `cancelOrder()`, `reverseOrder()`
 
 ### 2. Certificate Handling (`src/certificates/Certificate.js`)
