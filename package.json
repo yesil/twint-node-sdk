@@ -1,0 +1,65 @@
+{
+  "name": "twint-sdk",
+  "version": "1.0.0",
+  "description": "Node.js SDK for TWINT payment integration",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node dev-server.js",
+    "dev": "node --watch dev-server.js",
+    "dev:demo": "web-dev-server --node-resolve --open=/demo/ --watch",
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "lint": "eslint src test --ext .js",
+    "lint:fix": "eslint src test --ext .js --fix",
+    "format": "prettier --write \"src/**/*.js\" \"test/**/*.js\"",
+    "format:check": "prettier --check \"src/**/*.js\" \"test/**/*.js\""
+  },
+  "keywords": [
+    "twint",
+    "payment",
+    "switzerland",
+    "checkout",
+    "express-checkout",
+    "sdk",
+    "api"
+  ],
+  "author": "TWINT AG",
+  "license": "MIT",
+  "homepage": "https://github.com/yesil/twint-node-sdk",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:yesil/twint-node-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yesil/twint-node-sdk/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "soap": "^1.0.0",
+    "uuid": "^9.0.1"
+  },
+  "optionalDependencies": {
+    "@spectrum-web-components/button": "^0.42.0",
+    "@spectrum-web-components/card": "^0.42.0",
+    "@spectrum-web-components/divider": "^0.42.0",
+    "@spectrum-web-components/icons-workflow": "^0.42.0",
+    "@spectrum-web-components/progress-circle": "^0.42.0",
+    "@spectrum-web-components/theme": "^0.42.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "lit": "^3.1.0",
+    "qrcode": "^1.5.3",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@web/dev-server": "^0.4.6",
+    "eslint": "^8.54.0",
+    "prettier": "^3.1.0",
+    "xml-formatter": "^3.6.6"
+  }
+}

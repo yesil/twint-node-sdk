@@ -1,18 +1,23 @@
-/build export-ignore
-/resources/docs export-ignore
-/resources/config/soap.php export-ignore
-/tests export-ignore
-/tools export-ignore
-/docker-compose.yml export-ignore
-/Dockerfile export-ignore
-/Makefile export-ignore
-/ecs*.php export-ignore
-/phpunit.xml.dist export-ignore
-/phpstan*.neon export-ignore
-/renovate.json export-ignore
-/.env.dist export-ignore
+# Git attributes for Node.js project
+
+# Ensure consistent line endings
+* text=auto eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.p12 binary
+*.pfx binary
+*.wsdl binary
+*.xsd binary
+
+# Export ignore for npm package
+/test export-ignore
 /.gitignore export-ignore
-/.gitlab-ci.yml export-ignore
-/composer.lock export-ignore
-/php-extensions.txt export-ignore
 /.gitattributes export-ignore
+/.eslintrc.json export-ignore
+/.prettierrc.json export-ignore
+/dev-server.js export-ignore
