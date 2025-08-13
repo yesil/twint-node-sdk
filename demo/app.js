@@ -1,263 +1,194 @@
 /**
  * TWINT Payment Demo Application
  * 
- * Demonstrates how to use the pay-with-twint component.
+ * Clean demo controller for the pay-with-twint component
  */
 
+// Import the pay-with-twint component
 import '../src/components/pay-with-twint.js';
 
-class TwintDemoApp {
+class TwintDemo {
   constructor() {
-    this.paymentComponent = null;
-    this.eventLog = [];
-    
-    this.initializeUI();
-    this.attachEventListeners();
-  }
-
-  initializeUI() {
-    // Get DOM elements
-    this.container = document.getElementById('demo-container');
-    this.formSection = document.getElementById('form-section');
-    this.componentSection = document.getElementById('component-section');
-    this.eventLogContainer = document.getElementById('event-log');
-    
-    // Form elements
+    this.component = document.getElementById('payment-component');
+    this.eventLog = document.getElementById('event-log');
+    this.startButton = document.getElementById('start-payment');
     this.referenceInput = document.getElementById('reference');
     this.amountInput = document.getElementById('amount');
     this.confirmationSelect = document.getElementById('confirmation');
     
-    // Control buttons
-    this.startBtn = document.getElementById('start-payment');
-    this.resetBtn = document.getElementById('reset-demo');
-    
-    // Theme controls
-    this.themeSelect = document.getElementById('theme-select');
-    this.scaleSelect = document.getElementById('scale-select');
-    
-    // Generate initial reference
-    this.generateReference();
+    this.init();
   }
-
-  attachEventListeners() {
-    // Form submission
-    this.startBtn.addEventListener('click', () => this.handleStartPayment());
-    this.resetBtn.addEventListener('click', () => this.handleReset());
+  
+  init() {
+    this.attachFormHandlers();
+    this.attachComponentListeners();
+    this.attachDemoComponentListeners();
+    this.generateReference();
+    this.logEvent('READY', 'Demo application initialized');
+  }
+  
+  attachFormHandlers() {
+    this.startButton?.addEventListener('click', () => this.handleStartPayment());
     
-    // Theme controls
-    this.themeSelect?.addEventListener('change', (e) => {
-      if (this.paymentComponent) {
-        this.paymentComponent.theme = e.target.value;
-        this.logEvent('SETTINGS', `Theme changed to ${e.target.value}`);
-      }
-    });
-    
-    this.scaleSelect?.addEventListener('change', (e) => {
-      if (this.paymentComponent) {
-        this.paymentComponent.scale = e.target.value;
-        this.logEvent('SETTINGS', `Scale changed to ${e.target.value}`);
-      }
-    });
-    
-    // Auto-format amount
-    this.amountInput.addEventListener('blur', () => {
+    // Auto-format amount on blur
+    this.amountInput?.addEventListener('blur', () => {
       const value = parseFloat(this.amountInput.value);
       if (!isNaN(value)) {
         this.amountInput.value = value.toFixed(2);
       }
     });
   }
-
-  generateReference() {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    this.referenceInput.value = `DEMO-${timestamp}-${random}`;
-  }
-
-  async handleStartPayment() {
+  
+  handleStartPayment() {
     const reference = this.referenceInput.value.trim();
     const amount = parseFloat(this.amountInput.value);
     const confirmationNeeded = this.confirmationSelect.value === 'true';
     
     if (!reference || isNaN(amount) || amount <= 0) {
-      this.showError('Please enter valid payment details');
+      this.logEvent('ERROR', 'Please enter valid payment details');
       return;
     }
     
-    this.clearMessages();
+    this.logEvent('START', `Initiating payment: ${reference}, CHF ${amount}`);
     
-    this.startWithAutoComponent(reference, amount, confirmationNeeded);
+    // Start payment using the component's public method
+    this.startPayment(reference, amount, confirmationNeeded);
   }
-
-  startWithAutoComponent(reference, amount, confirmationNeeded) {
-    this.logEvent('DEMO', 'Starting payment with auto-start component');
+  
+  attachComponentListeners() {
+    if (!this.component) return;
     
-    // Clear existing component
-    this.componentSection.innerHTML = '';
+    // Payment started
+    this.component.addEventListener('payment-started', (e) => {
+      this.logEvent('STARTED', `Order ID: ${e.detail.id}`);
+    });
     
-    // Create component with attributes for auto-start
-    const componentHTML = `
-      <pay-with-twint 
-        reference="${reference}"
-        amount="${amount}"
-        api-url="/api"
-        theme="${this.themeSelect.value}"
-        scale="${this.scaleSelect.value}"
-        confirmation-needed="${confirmationNeeded}"
-      ></pay-with-twint>
+    // Payment completed
+    this.component.addEventListener('payment-completed', (e) => {
+      this.logEvent('COMPLETED', `Order ${e.detail.id} completed successfully`);
+    });
+    
+    // Payment failed
+    this.component.addEventListener('payment-failed', (e) => {
+      this.logEvent('FAILED', `Order ${e.detail.id} failed`);
+    });
+    
+    // Payment cancelled
+    this.component.addEventListener('payment-cancelled', (e) => {
+      this.logEvent('CANCELLED', `Order ${e.detail.id} was cancelled`);
+    });
+    
+    // Status changed
+    this.component.addEventListener('status-changed', (e) => {
+      this.logEvent('STATUS', `${e.detail.id}: ${e.detail.status}`);
+    });
+    
+    // Payment error
+    this.component.addEventListener('payment-error', (e) => {
+      this.logEvent('ERROR', e.detail.error);
+    });
+  }
+  
+  attachDemoComponentListeners() {
+    // Get all demo components
+    const demoComponents = [
+      { id: 'example-success', label: 'SUCCESS_DEMO' },
+      { id: 'example-cancelled', label: 'CANCEL_DEMO' },
+      { id: 'example-german', label: 'GERMAN_DEMO' },
+      { id: 'example-dark', label: 'DARK_DEMO' }
+    ];
+    
+    demoComponents.forEach(({ id, label }) => {
+      const component = document.getElementById(id);
+      if (!component) return;
+      
+      // Add event listeners for each demo component
+      component.addEventListener('payment-started', (e) => {
+        this.logEvent(label, `Payment started - Order: ${e.detail?.id || 'N/A'}`);
+      });
+      
+      component.addEventListener('payment-completed', (e) => {
+        this.logEvent(label, `Payment completed - Order: ${e.detail?.id || e.detail?.reference || 'N/A'}`);
+      });
+      
+      component.addEventListener('payment-failed', (e) => {
+        this.logEvent(label, `Payment failed - Order: ${e.detail?.id || 'N/A'}`);
+      });
+      
+      component.addEventListener('payment-cancelled', (e) => {
+        this.logEvent(label, `Payment cancelled - Order: ${e.detail?.id || e.detail?.reference || 'N/A'}`);
+      });
+      
+      component.addEventListener('status-changed', (e) => {
+        this.logEvent(label, `Status changed to: ${e.detail?.status || 'N/A'}`);
+      });
+      
+      component.addEventListener('payment-error', (e) => {
+        this.logEvent(label, `Error: ${e.detail?.error || 'Unknown error'}`);
+      });
+    });
+    
+    // Log when demo components are ready
+    this.logEvent('DEMO', 'All demo components initialized with event listeners');
+  }
+  
+  
+  generateReference() {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const reference = `DEMO-${timestamp}-${random}`;
+    if (this.referenceInput) {
+      this.referenceInput.value = reference;
+    }
+    return reference;
+  }
+  
+  logEvent(type, message) {
+    const time = new Date().toLocaleTimeString();
+    const entry = document.createElement('div');
+    entry.className = 'event-entry';
+    entry.innerHTML = `
+      <span class="event-time">${time}</span>
+      <span class="event-type">${type}</span>
+      <span class="event-message">${message}</span>
     `;
     
-    this.componentSection.innerHTML = componentHTML;
-    this.paymentComponent = this.componentSection.querySelector('pay-with-twint');
+    // Insert at the beginning
+    this.eventLog.insertBefore(entry, this.eventLog.firstChild);
     
-    // Attach event listeners
-    this.attachComponentListeners();
-    
-    this.showComponentSection();
-    this.logEvent('COMPONENT', 'Auto-start component created');
-  }
-
-  attachComponentListeners() {
-    if (!this.paymentComponent) return;
-    
-    this.paymentComponent.addEventListener('payment-started', (e) => {
-      this.logEvent('PAYMENT_STARTED', `Order ID: ${e.detail.id}`);
-    });
-    
-    this.paymentComponent.addEventListener('payment-completed', (e) => {
-      this.logEvent('PAYMENT_COMPLETED', `Order ${e.detail.id} completed`);
-      this.showSuccess('Payment completed successfully!');
-    });
-    
-    this.paymentComponent.addEventListener('payment-failed', (e) => {
-      this.logEvent('PAYMENT_FAILED', `Order ${e.detail.id} failed`);
-      this.showError('Payment failed');
-    });
-    
-    this.paymentComponent.addEventListener('payment-cancelled', (e) => {
-      this.logEvent('PAYMENT_CANCELLED', `Order ${e.detail.id} cancelled`);
-      this.showInfo('Payment cancelled');
-    });
-    
-    this.paymentComponent.addEventListener('status-changed', (e) => {
-      this.logEvent('STATUS_CHANGED', `Order ${e.detail.id}: ${e.detail.status}`);
-    });
-    
-    this.paymentComponent.addEventListener('payment-error', (e) => {
-      this.logEvent('PAYMENT_ERROR', e.detail.error);
-      this.showError(e.detail.error);
-    });
-  }
-
-  handleReset() {
-    this.logEvent('DEMO', 'Resetting demo');
-    
-    // Reset component
-    if (this.paymentComponent) {
-      this.paymentComponent.reset();
+    // Keep only last 20 entries
+    while (this.eventLog.children.length > 20) {
+      this.eventLog.removeChild(this.eventLog.lastChild);
     }
-    
-    // Clear component section
-    this.componentSection.innerHTML = '';
-    this.paymentComponent = null;
-    
-    // Generate new reference
-    this.generateReference();
-    this.amountInput.value = '';
-    
-    // Show form section
-    this.showFormSection();
-    
-    // Clear messages
-    this.clearMessages();
   }
-
-  showFormSection() {
-    this.formSection.style.display = 'block';
-    this.componentSection.style.display = 'none';
+  
+  /**
+   * Public method to start a new payment
+   */
+  startPayment(reference, amount, confirmationNeeded = true) {
+    this.logEvent('API', `Starting payment via API: ${reference}`);
+    return this.component.startPayment(reference, amount, confirmationNeeded);
   }
-
-  showComponentSection() {
-    this.formSection.style.display = 'none';
-    this.componentSection.style.display = 'block';
-  }
-
-  logEvent(type, message) {
-    const entry = {
-      time: new Date().toLocaleTimeString(),
-      type,
-      message
-    };
-    
-    this.eventLog.unshift(entry);
-    
-    // Keep only last 50 events
-    if (this.eventLog.length > 50) {
-      this.eventLog = this.eventLog.slice(0, 50);
-    }
-    
-    // Update UI
-    this.updateEventLog();
-  }
-
-  updateEventLog() {
-    if (!this.eventLogContainer) return;
-    
-    const html = this.eventLog.map(entry => `
-      <div class="event-entry">
-        <span class="event-time">${entry.time}</span>
-        <span class="event-type">${entry.type}</span>
-        <span class="event-message">${entry.message}</span>
-      </div>
-    `).join('');
-    
-    this.eventLogContainer.innerHTML = html;
-  }
-
-  showError(message) {
-    this.showMessage(message, 'error');
-  }
-
-  showSuccess(message) {
-    this.showMessage(message, 'success');
-  }
-
-  showInfo(message) {
-    this.showMessage(message, 'info');
-  }
-
-  showMessage(message, type) {
-    const container = document.getElementById('message-container');
-    if (!container) return;
-    
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message message-${type}`;
-    messageDiv.textContent = message;
-    
-    container.appendChild(messageDiv);
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-      messageDiv.remove();
-    }, 5000);
-  }
-
-  clearMessages() {
-    const container = document.getElementById('message-container');
-    if (container) {
-      container.innerHTML = '';
-    }
+  
+  /**
+   * Public method to reset the component
+   */
+  reset() {
+    this.logEvent('API', 'Resetting component');
+    this.component.reset();
   }
 }
 
-// Initialize app when DOM is ready
+// Initialize when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    window.twintDemo = new TwintDemoApp();
+    window.twintDemo = new TwintDemo();
+    console.log('TWINT Payment Demo loaded. Use window.twintDemo to access the demo.');
   });
 } else {
-  window.twintDemo = new TwintDemoApp();
+  window.twintDemo = new TwintDemo();
+  console.log('TWINT Payment Demo loaded. Use window.twintDemo to access the demo.');
 }
 
-// Export for console access
-export default TwintDemoApp;
+// Export for module usage
+export default TwintDemo;

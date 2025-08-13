@@ -15,7 +15,7 @@ export class Environment {
    */
   static PRODUCTION = new Environment(
     'production',
-    'https://service.twint.ch/merchant/service/TWINTMerchantServicev8_6',
+    'https://service.twint.ch/merchant/service/TWINTMerchantServiceV8_6',
   );
 
   /**
@@ -23,7 +23,7 @@ export class Environment {
    */
   static INTEGRATION = new Environment(
     'integration',
-    'https://int.service.twint.ch/merchant/service/TWINTMerchantServicev8_6',
+    'https://int.service.twint.ch/merchant/service/TWINTMerchantServiceV8_6',
   );
 
   /**
@@ -31,7 +31,7 @@ export class Environment {
    */
   static STAGING = new Environment(
     'staging',
-    'https://stage.service.twint.ch/merchant/service/TWINTMerchantServicev8_6',
+    'https://stage.service.twint.ch/merchant/service/TWINTMerchantServiceV8_6',
   );
 
   /**

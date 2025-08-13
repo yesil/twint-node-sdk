@@ -3,7 +3,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import xmlFormatter from 'xml-formatter';
 import winston from 'winston';
-import { v4 as uuidv4 } from 'uuid';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -76,7 +75,6 @@ export class TwintSoapClient {
       const tlsOptions = this.#certificate.getTlsOptions();
       const options = {
         endpoint: this.#environment.url,
-        forceSoap12Headers: true,
         pfx: tlsOptions.pfx,
         passphrase: tlsOptions.passphrase,
         rejectUnauthorized: false, // Temporarily for debugging
@@ -86,9 +84,6 @@ export class TwintSoapClient {
       };
 
       this.#client = await soap.createClientAsync(wsdlPath, options);
-      
-      // Add SOAP headers for every request
-      this.#addRequestHeaders();
       
       // Add request/response logging if debug is enabled
       if (process.env.SOAP_DEBUG === 'true') {
@@ -122,37 +117,47 @@ export class TwintSoapClient {
   }
 
   /**
-   * Add required SOAP headers for TWINT
+   * Set SOAP headers for the next request
    * @private
+   * @param {Object|null} headers The headers to set, or null to clear headers
    */
-  #addRequestHeaders() {
-    // Create header with MessageId, ClientSoftwareName, and ClientSoftwareVersion
-    const createHeader = () => {
-      const messageId = uuidv4();
-      const header = {
-        RequestHeaderElement: {
-          MessageId: messageId,
-          ClientSoftwareName: 'TWINT PHP SDK',
-          ClientSoftwareVersion: '1.6.2',
-          attributes: {
-            xmlns: 'http://service.twint.ch/header/types/v8_6'
-          }
-        }
-      };
-      return header;
+  #setHeaders(headers) {
+    this.#client.clearSoapHeaders();
+    if (headers) {
+      this.#client.addSoapHeader(headers);
+    }
+  }
+
+  /**
+   * Execute SOAP method with specific headers
+   * @private
+   * @param {string} methodName The SOAP method name
+   * @param {Object} request The request object
+   * @param {Object|null} headers The headers to include (null for no headers)
+   * @returns {Promise<Object>}
+   */
+  async #executeMethod(methodName, request, headers = null) {
+    if (!this.#client) {
+      await this.initialize();
+    }
+
+    // Set SOAP headers for this request
+    this.#setHeaders(headers);
+
+    // Set HTTP headers for this specific request
+    const options = {
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'SOAPAction': methodName,
+      }
     };
-    
-    // Add header to each request
-    this.#client.addSoapHeader(createHeader());
-    
-    // Hook into the request to regenerate MessageId for each call
-    const originalRequest = this.#client._invoke.bind(this.#client);
-    this.#client._invoke = function(...args) {
-      // Clear existing headers and add new ones with fresh MessageId
-      this.clearSoapHeaders();
-      this.addSoapHeader(createHeader());
-      return originalRequest.apply(this, args);
-    };
+
+    try {
+      const [result] = await this.#client[`${methodName}Async`](request, options);
+      return result;
+    } catch (error) {
+      throw error;
+    }
   }
 
   /**
@@ -242,99 +247,101 @@ export class TwintSoapClient {
   /**
    * Check system status
    * @param {Object} request
+   * @param {Object|null} headers
    * @returns {Promise<Object>}
    */
-  async checkSystemStatus(request) {
-    try {
-      if (!this.#client) {
-        await this.initialize();
-      }
-      const result = await this.#client.CheckSystemStatusAsync(request);
-      return result[0] || result;
-    } catch (error) {
-      if (process.env.SOAP_DEBUG === 'true') {
-        this.#logger.error('❌ CheckSystemStatus failed: ' + error.message, { soap: true, error });
-      }
-      throw error;
-    }
+  async checkSystemStatus(request, headers = null) {
+    return this.#executeMethod('CheckSystemStatus', request, headers);
   }
 
   /**
    * Start an order
    * @param {Object} request
+   * @param {Object|null} headers
    * @returns {Promise<Object>}
    */
-  async startOrder(request) {
-    if (!this.#client) {
-      await this.initialize();
-    }
-    const [result] = await this.#client.StartOrderAsync(request);
-    return result;
+  async startOrder(request, headers = null) {
+    return this.#executeMethod('StartOrder', request, headers);
   }
 
   /**
    * Monitor an order
    * @param {Object} request
+   * @param {Object|null} headers
    * @returns {Promise<Object>}
    */
-  async monitorOrder(request) {
-    if (!this.#client) {
-      await this.initialize();
-    }
-    const [result] = await this.#client.MonitorOrderAsync(request);
-    return result;
+  async monitorOrder(request, headers = null) {
+    return this.#executeMethod('MonitorOrder', request, headers);
   }
 
   /**
    * Confirm an order
    * @param {Object} request
+   * @param {Object|null} headers
    * @returns {Promise<Object>}
    */
-  async confirmOrder(request) {
-    if (!this.#client) {
-      await this.initialize();
-    }
-    const [result] = await this.#client.ConfirmOrderAsync(request);
-    return result;
+  async confirmOrder(request, headers = null) {
+    return this.#executeMethod('ConfirmOrder', request, headers);
   }
 
   /**
    * Cancel an order
    * @param {Object} request
+   * @param {Object|null} headers
    * @returns {Promise<Object>}
    */
-  async cancelOrder(request) {
-    if (!this.#client) {
-      await this.initialize();
-    }
-    const [result] = await this.#client.CancelOrderAsync(request);
-    return result;
+  async cancelOrder(request, headers = null) {
+    return this.#executeMethod('CancelOrder', request, headers);
   }
 
   /**
    * Reverse an order (refund)
    * @param {Object} request
+   * @param {Object|null} headers
    * @returns {Promise<Object>}
    */
-  async reverseOrder(request) {
-    if (!this.#client) {
-      await this.initialize();
-    }
-    const [result] = await this.#client.ReverseOrderAsync(request);
-    return result;
+  async reverseOrder(request, headers = null) {
+    return this.#executeMethod('ReverseOrder', request, headers);
   }
 
   /**
    * Request fast checkout check-in
    * @param {Object} request
+   * @param {Object|null} headers
    * @returns {Promise<Object>}
    */
-  async requestFastCheckoutCheckIn(request) {
-    if (!this.#client) {
-      await this.initialize();
-    }
-    const [result] = await this.#client.RequestFastCheckoutCheckInAsync(request);
-    return result;
+  async requestFastCheckoutCheckIn(request, headers = null) {
+    return this.#executeMethod('RequestFastCheckoutCheckIn', request, headers);
+  }
+
+  /**
+   * Monitor fast checkout check-in
+   * @param {Object} request
+   * @param {Object|null} headers
+   * @returns {Promise<Object>}
+   */
+  async monitorFastCheckoutCheckIn(request, headers = null) {
+    return this.#executeMethod('MonitorFastCheckoutCheckIn', request, headers);
+  }
+
+  /**
+   * Cancel check-in
+   * @param {Object} request
+   * @param {Object|null} headers
+   * @returns {Promise<Object>}
+   */
+  async cancelCheckIn(request, headers = null) {
+    return this.#executeMethod('CancelCheckIn', request, headers);
+  }
+
+  /**
+   * Enroll cash register
+   * @param {Object} request
+   * @param {Object|null} headers
+   * @returns {Promise<Object>}
+   */
+  async enrollCashRegister(request, headers = null) {
+    return this.#executeMethod('EnrollCashRegister', request, headers);
   }
 
   /**

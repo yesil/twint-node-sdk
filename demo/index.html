@@ -13,8 +13,11 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
 
+    pay-with-twint {
+      margin: 20px;
+    }
+
     .demo-container {
-      max-width: 1200px;
       margin: 0 auto;
     }
 
@@ -62,6 +65,81 @@
       background: white;
       font-size: 14px;
       cursor: pointer;
+    }
+
+    .examples-container {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      margin-bottom: 30px;
+    }
+
+    .example-section {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      padding: 20px 0;
+      margin-bottom: 40px;
+    }
+
+    .example-markup {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 20px;
+      overflow-x: auto;
+      max-width: 800px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .example-markup h3 {
+      margin-top: 0;
+      color: #333;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .example-markup pre {
+      margin: 0;
+      font-size: 12px;
+      color: #444;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .example-result {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 400px;
+      background: #fafafa;
+      border-radius: 8px;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .example-result h3 {
+      margin-top: 0;
+      margin-bottom: 20px;
+      color: #333;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .dark-theme-wrapper {
+      background: #1a1a1a;
+      padding: 20px;
+      border-radius: 8px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
     }
 
     .main-content {
@@ -276,31 +354,14 @@
   <div class="demo-container" id="demo-container">
     <div class="demo-header">
       <h1>TWINT Payment Demo</h1>
-      <p>Web Components with Adobe Spectrum and Lit</p>
     </div>
 
-    <div class="demo-controls">
-      <div class="control-group">
-        <label for="theme-select">Theme:</label>
-        <select id="theme-select">
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
-
-        <label for="scale-select">Scale:</label>
-        <select id="scale-select">
-          <option value="small">Small</option>
-          <option value="medium" selected>Medium</option>
-          <option value="large">Large</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="main-content">
-      <div class="panel">
-        <div id="form-section">
-          <h2>Start Payment</h2>
-          
+    <!-- API Test Panel -->
+    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+        <h2>Test with Real API</h2>
+        
+        <!-- Payment form -->
+        <div id="payment-form">
           <div class="form-group">
             <label for="reference">Order Reference</label>
             <input type="text" id="reference" placeholder="e.g., ORDER-123" />
@@ -319,45 +380,200 @@
             </select>
           </div>
           
-          <div class="button-group">
-            <button id="start-payment" class="btn-primary">Start Payment</button>
-            <button id="reset-demo" class="btn-secondary">Reset</button>
-          </div>
+          <button id="start-payment" class="btn-primary">Start Payment</button>
         </div>
         
-        <div id="component-section">
-          <!-- Payment component will be inserted here -->
-        </div>
-      </div>
+        <!-- Pay with TWINT component for real testing -->
+        <pay-with-twint 
+          id="payment-component"
+          api-url="/twint"
+          merchant-name="Test Merchant"
+          logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg">
+        </pay-with-twint>
+    </div>
 
-      <div class="panel">
-        <h2>Integration Example</h2>
-        
-        <div class="code-example">
-          <h4>1. Usage</h4>
+    <!-- Success Example -->
+    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+      <h2>Success State Example</h2>
+      <div class="example-section">
+        <div class="example-markup">
+          <h3>Markup</h3>
           <pre>&lt;pay-with-twint 
-  reference="ORDER-123"
-  amount="99.95"
-  api-url="/api"
-  theme="light"
-  confirmation-needed="true"&gt;
+  id="payment"
+  success
+  api-url="/twint"
+  merchant-name="Demo Store"
+  logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg"&gt;
 &lt;/pay-with-twint&gt;</pre>
         </div>
-        
-        <div class="code-example">
-          <h4>2. Available Events</h4>
-          <pre>// Component events:
-- payment-started
-- payment-completed
-- payment-failed
-- payment-cancelled
-- status-changed
-- payment-error
+        <div class="example-result">
+          <h3>Result - Payment Success</h3>
+          <pay-with-twint 
+            id="example-success"
+            success
+            api-url="/twint"
+            reference="ORDER-2024-001"
+            amount="99.95"
+            merchant-name="Demo Store"
+            logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg">
+          </pay-with-twint>
+        </div>
+      </div>
+    </div>
 
-// Example listener:
-payment.addEventListener('status-changed', (e) => {
-  console.log('Status:', e.detail.status);
-});</pre>
+    <!-- Cancelled Example -->
+    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+      <h2>Cancelled State Example</h2>
+      <div class="example-section">
+        <div class="example-markup">
+          <h3>Markup</h3>
+          <pre>&lt;!-- To show cancelled state programmatically --&gt;
+&lt;pay-with-twint 
+  id="payment"
+  api-url="/twint"
+  reference="ORDER-2024-002"
+  amount="149.95"
+  merchant-name="Demo Store"
+  cancelled
+  logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg"&gt;
+&lt;/pay-with-twint&gt;</pre>
+        </div>
+        <div class="example-result">
+          <h3>Result - Payment Cancelled</h3>
+          <pay-with-twint 
+            cancelled
+            id="example-cancelled"
+            api-url="/twint"
+            reference="ORDER-2024-002"
+            amount="149.95"
+            merchant-name="Demo Store"
+            logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg">
+          </pay-with-twint>
+        </div>
+      </div>
+    </div>
+
+    <!-- German Localization Example -->
+    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+      <h2>German Localization Example</h2>
+      <div class="example-section">
+        <div class="example-markup">
+          <h3>Markup</h3>
+          <pre>&lt;pay-with-twint 
+  success
+  api-url="/twint"
+  reference="BEST-2024-002"
+  amount="149.90"
+  merchant-name="Schweizer Laden"
+  logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg"
+  
+  text-cancel-checkout="Abbrechen"
+  text-scan-instruction="QR-Code mit TWINT App scannen"
+  text-follow-instruction="Anweisungen in der App befolgen"
+  text-processing="Zahlung wird verarbeitet..."
+  text-payment-success="Zahlung erfolgreich!"
+  text-thank-you="Vielen Dank für Ihre Zahlung"
+  text-order-complete="Ihre Bestellung wurde erfolgreich abgeschlossen"
+  text-payment-cancelled="Zahlung abgebrochen"
+  text-order-cancelled="Ihre Bestellung wurde storniert"
+  text-order-id-label="Bestell-Nr."
+  text-reference-label="Referenz"
+  text-merchant-label="Händler"
+  text-total-amount-label="Gesamtbetrag"
+  text-amount-label="Betrag"&gt;
+&lt;/pay-with-twint&gt;
+
+&lt;script&gt;
+  // Event-Handler für deutsche Version
+  const payment = document.getElementById('payment-de');
+  
+  payment.addEventListener('payment-completed', (e) => {
+    alert('Zahlung erfolgreich abgeschlossen!');
+  });
+  
+  payment.addEventListener('status-changed', (e) => {
+    console.log('Status geändert:', e.detail.status);
+  });
+&lt;/script&gt;</pre>
+        </div>
+        <div class="example-result">
+          <h3>Result</h3>
+          <pay-with-twint 
+            id="example-german"
+            success
+            api-url="/twint"
+            reference="BEST-2024-002"
+            amount="149.90"
+            merchant-name="Schweizer Laden"
+            logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg"
+            text-cancel-checkout="Abbrechen"
+            text-scan-instruction="QR-Code mit TWINT App scannen"
+            text-follow-instruction="Anweisungen in der App befolgen"
+            text-processing="Zahlung wird verarbeitet..."
+            text-payment-success="Zahlung erfolgreich!"
+            text-thank-you="Vielen Dank für Ihre Zahlung"
+            text-order-complete="Ihre Bestellung wurde erfolgreich abgeschlossen"
+            text-payment-cancelled="Zahlung abgebrochen"
+            text-order-cancelled="Ihre Bestellung wurde storniert"
+            text-order-id-label="Bestell-Nr."
+            text-reference-label="Referenz"
+            text-merchant-label="Händler"
+            text-total-amount-label="Gesamtbetrag"
+            text-amount-label="Betrag">
+          </pay-with-twint>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dark Theme Example -->
+    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+      <h2>Dark Theme Example</h2>
+      <div class="example-section">
+        <div class="example-markup">
+          <h3>Markup</h3>
+          <pre>&lt;div style="background: #1a1a1a; padding: 20px; border-radius: 8px;"&gt;
+  &lt;pay-with-twint 
+    id="dark-payment"
+    theme="dark"
+    success
+    api-url="/twint"
+    reference="DARK-2024-003"
+    amount="199.00"
+    merchant-name="Night Shop"
+    logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg"&gt;
+  &lt;/pay-with-twint&gt;
+  
+  &lt;script&gt;
+    // Dark theme with event handling
+    const darkPayment = document.getElementById('dark-payment');
+    
+    darkPayment.addEventListener('payment-started', (e) => {
+      console.log('Dark theme payment started', e.detail);
+    });
+    
+    // Custom dark theme notification
+    darkPayment.addEventListener('payment-completed', (e) => {
+      setTimeout(() => {
+        document.body.style.background = '';
+      }, 500);
+    });
+  &lt;/script&gt;
+&lt;/div&gt;</pre>
+        </div>
+        <div class="example-result">
+          <h3>Result</h3>
+          <div class="dark-theme-wrapper">
+            <pay-with-twint 
+              id="example-dark"
+              theme="dark"
+              success
+              api-url="/twint"
+              reference="DARK-2024-003"
+              amount="199.00"
+              merchant-name="Night Shop"
+              logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg">
+            </pay-with-twint>
+          </div>
         </div>
       </div>
     </div>
@@ -376,9 +592,6 @@ payment.addEventListener('status-changed', (e) => {
 
   <div id="message-container"></div>
 
-  <script type="module">
-    import './app.js';
-    console.log('TWINT Payment Demo loaded. Use window.twintDemo to access the demo app.');
-  </script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

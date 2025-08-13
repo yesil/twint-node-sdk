@@ -16,7 +16,7 @@ import {
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.DEV_SERVER_PORT || 8000;
 
 // Configure logger
 const logger = winston.createLogger({
@@ -24,10 +24,19 @@ const logger = winston.createLogger({
   format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
   transports: [
     new winston.transports.Console({
-      format: winston.format.combine(winston.format.colorize(), winston.format.simple()),
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.printf(({ level, message, timestamp, ...meta }) => {
+          // For SOAP messages, show them clearly
+          if (meta.soap && process.env.SOAP_DEBUG === 'true') {
+            return message;
+          }
+          return winston.format.simple().transform({ level, message, timestamp, ...meta })[Symbol.for('message')];
+        })
+      ),
     }),
     new winston.transports.File({
-      filename: 'server.log',
+      filename: 'dev-server.log',
       format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
     }),
   ],
@@ -49,6 +58,7 @@ app.use((req, res, next) => {
 
 // TWINT Client initialization
 let twintClient = null;
+let cashRegisterId = null;
 const orderStore = new Map();
 
 async function initializeTwintClient() {
@@ -85,21 +95,45 @@ async function initializeTwintClient() {
       environment = Environment.INTEGRATION; // Default to integration for dev
     }
 
-    // Initialize client
+    // Check for required cash register ID
+    if (!process.env.TWINT_CASH_REGISTER_ID) {
+      throw new Error('TWINT_CASH_REGISTER_ID is required in environment variables');
+    }
+
+    cashRegisterId = process.env.TWINT_CASH_REGISTER_ID;
+
+    // Initialize client with required cash register ID
     twintClient = new TwintClient({
       certificate,
       storeUuid: process.env.TWINT_STORE_UUID,
       environment,
+      cashRegisterId: cashRegisterId,
     });
 
-    logger.info('TWINT client initialized successfully', {
+    logger.info('TWINT client initialized', {
       environment: environment.name,
       storeUuid: process.env.TWINT_STORE_UUID,
+      cashRegisterId: cashRegisterId,
     });
 
-    // Test connection
-    const status = await twintClient.checkSystemStatus();
-    logger.info('TWINT system status', status);
+    // Enroll the cash register at startup
+    try {
+      logger.info('Enrolling cash register with TWINT...', { cashRegisterId });
+      const enrollmentResult = await twintClient.enrollCashRegister('EPOS', cashRegisterId);
+      logger.info('Cash register enrolled successfully', {
+        cashRegisterId: enrollmentResult.cashRegisterId,
+        beaconUuid: enrollmentResult.beaconUuid,
+        majorId: enrollmentResult.majorId,
+        minorId: enrollmentResult.minorId,
+      });
+    } catch (enrollError) {
+      // If enrollment fails, it might be because the cash register is already enrolled
+      // Log the error but continue, as the cash register might already be registered
+      logger.warn('Cash register enrollment failed (may already be enrolled)', {
+        cashRegisterId: cashRegisterId,
+        error: enrollError.message,
+      });
+    }
 
     return true;
   } catch (error) {
@@ -108,8 +142,8 @@ async function initializeTwintClient() {
   }
 }
 
-// API Routes - Real TWINT operations
-app.post('/api/orders/start', async (req, res) => {
+// API Routes - Real TWINT operations with /twint prefix
+app.post('/twint/orders/start', async (req, res) => {
   try {
     if (!twintClient) {
       throw new Error('TWINT client not initialized');
@@ -133,19 +167,24 @@ app.post('/api/orders/start', async (req, res) => {
       confirmationNeeded,
     });
 
-    // Generate QR code
-    let qrCodeDataUrl = null;
-    if (order.qrCode) {
-      try {
-        qrCodeDataUrl = await QRCode.toDataURL(order.qrCode, {
-          width: 300,
-          margin: 2,
-        });
-      } catch (qrError) {
-        logger.warn('Failed to generate QR code image:', qrError.message);
-        qrCodeDataUrl = order.qrCode;
-      }
+    // Use the QR code directly from TWINT response (it's already a base64 data URL)
+    if (!order.qrCode) {
+      logger.error('No QR code received from TWINT API');
+      return res.status(500).json({
+        success: false,
+        error: 'TWINT API did not return a QR code',
+      });
     }
+    
+    if (!order.pairingToken) {
+      logger.error('No pairing token received from TWINT API');
+      return res.status(500).json({
+        success: false,
+        error: 'TWINT API did not return a pairing token',
+      });
+    }
+
+    let qrCodeDataUrl = order.qrCode;
 
     const orderData = {
       id: order.id.toString(),
@@ -182,7 +221,7 @@ app.post('/api/orders/start', async (req, res) => {
   }
 });
 
-app.get('/api/orders/:orderId', async (req, res) => {
+app.get('/twint/orders/:orderId', async (req, res) => {
   try {
     if (!twintClient) {
       throw new Error('TWINT client not initialized');
@@ -232,7 +271,7 @@ app.get('/api/orders/:orderId', async (req, res) => {
   }
 });
 
-app.post('/api/orders/:orderId/confirm', async (req, res) => {
+app.post('/twint/orders/:orderId/confirm', async (req, res) => {
   try {
     if (!twintClient) {
       throw new Error('TWINT client not initialized');
@@ -282,7 +321,7 @@ app.post('/api/orders/:orderId/confirm', async (req, res) => {
   }
 });
 
-app.post('/api/orders/:orderId/cancel', async (req, res) => {
+app.post('/twint/orders/:orderId/cancel', async (req, res) => {
   try {
     if (!twintClient) {
       throw new Error('TWINT client not initialized');
@@ -324,11 +363,15 @@ app.post('/api/orders/:orderId/cancel', async (req, res) => {
 });
 
 // Health check endpoint
-app.get('/health', async (req, res) => {
+app.get('/twint/health', async (req, res) => {
   const health = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     twintClient: twintClient !== null,
+    cashRegister: {
+      enrolled: cashRegisterId !== null,
+      id: cashRegisterId ? cashRegisterId.substring(0, 8) + '...' : null,
+    },
   };
 
   if (twintClient) {
@@ -346,11 +389,6 @@ app.get('/health', async (req, res) => {
   res.json(health);
 });
 
-// Serve demo page at root
-app.get('/', (req, res) => {
-  res.redirect('/demo/');
-});
-
 // Start server
 async function startServer() {
   // Initialize TWINT client
@@ -363,33 +401,40 @@ async function startServer() {
     logger.error('- TWINT_CERTIFICATE_PASSWORD: Certificate password (if required)');
     logger.error('- TWINT_STORE_UUID: Your TWINT store UUID');
     logger.error('- TWINT_ENVIRONMENT: PRODUCTION, INTEGRATION, or STAGING');
+    logger.error('- TWINT_CASH_REGISTER_ID: (Optional) Existing cash register ID');
     process.exit(1);
   }
 
-  app.listen(PORT, () => {
-    logger.info('Server started', {
+  server = app.listen(PORT, () => {
+    logger.info('TWINT API Server started', {
       port: PORT,
       environment: process.env.TWINT_ENVIRONMENT || 'INTEGRATION',
       twintClient: 'CONNECTED',
+      cashRegisterId: cashRegisterId || 'NOT_ENROLLED',
     });
+    
+    const cashRegisterStatus = cashRegisterId 
+      ? `✓ (${cashRegisterId.substring(0, 8)}...)` 
+      : 'NOT ENROLLED';
+    
     console.log(`
 ╔════════════════════════════════════════════════╗
-║   TWINT SDK Development Server                 ║
+║   TWINT Development Server                     ║
 ╠════════════════════════════════════════════════╣
-║   Server: http://localhost:${PORT}                ║
-║   Demo: http://localhost:${PORT}/demo             ║
+║   API Server: http://localhost:${PORT}            ║
 ║   Environment: ${process.env.TWINT_ENVIRONMENT || 'INTEGRATION'}${' '.repeat(32 - (process.env.TWINT_ENVIRONMENT || 'INTEGRATION').length)}║
 ║   TWINT Client: CONNECTED ✓                    ║
-║   Logs: server.log                             ║
+║   Cash Register: ${cashRegisterStatus}${' '.repeat(30 - cashRegisterStatus.length)}║
+║   Logs: dev-server.log                         ║
 ║   SOAP Debug: ${process.env.SOAP_DEBUG === 'true' ? 'ENABLED 🔍' : 'DISABLED'}${' '.repeat(22 - (process.env.SOAP_DEBUG === 'true' ? 'ENABLED 🔍' : 'DISABLED').length)}║
 ╚════════════════════════════════════════════════╝
 
 API Endpoints (Real TWINT):
-- POST /api/orders/start         Start new order
-- GET  /api/orders/:orderId      Monitor order
-- POST /api/orders/:orderId/confirm  Confirm order
-- POST /api/orders/:orderId/cancel   Cancel order
-- GET  /health                   Health check
+- POST /twint/orders/start         Start new order
+- GET  /twint/orders/:orderId      Monitor order
+- POST /twint/orders/:orderId/confirm  Confirm order
+- POST /twint/orders/:orderId/cancel   Cancel order
+- GET  /twint/health               Health check
 
 ${process.env.SOAP_DEBUG === 'true' ? '📋 SOAP debugging enabled - XML requests/responses will be shown in console' : '💡 Tip: Set SOAP_DEBUG=true in .env to see formatted XML requests/responses'}
     `);
@@ -397,14 +442,37 @@ ${process.env.SOAP_DEBUG === 'true' ? '📋 SOAP debugging enabled - XML request
 }
 
 // Handle shutdown gracefully
-process.on('SIGTERM', () => {
+let server;
+
+process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down gracefully...');
+  if (server) {
+    await new Promise((resolve) => {
+      server.close(resolve);
+    });
+  }
   process.exit(0);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   logger.info('SIGINT received, shutting down gracefully...');
+  if (server) {
+    await new Promise((resolve) => {
+      server.close(resolve);
+    });
+  }
   process.exit(0);
+});
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
 
 // Start the server

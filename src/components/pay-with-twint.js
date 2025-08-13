@@ -1,13 +1,4 @@
 import { LitElement, html, css } from 'lit';
-import '@spectrum-web-components/theme/sp-theme.js';
-import '@spectrum-web-components/theme/src/themes.js';
-import '@spectrum-web-components/button/sp-button.js';
-import '@spectrum-web-components/card/sp-card.js';
-import '@spectrum-web-components/progress-circle/sp-progress-circle.js';
-import '@spectrum-web-components/divider/sp-divider.js';
-import '@spectrum-web-components/icons-workflow/icons/sp-icon-checkmark-circle.js';
-import '@spectrum-web-components/icons-workflow/icons/sp-icon-alert.js';
-import '@spectrum-web-components/icons-workflow/icons/sp-icon-close-circle.js';
 
 /**
  * PayWithTwint Web Component
@@ -16,14 +7,11 @@ import '@spectrum-web-components/icons-workflow/icons/sp-icon-close-circle.js';
  * 
  * @element pay-with-twint
  * 
- * @property {string} reference - Payment reference (if provided, auto-starts payment)
- * @property {number} amount - Payment amount in CHF (required with reference)
- * @property {string} apiUrl - Base API URL (default: '/api')
- * @property {string} theme - Theme: 'light' | 'dark' (default: 'light')
- * @property {string} scale - Scale: 'small' | 'medium' | 'large' (default: 'medium')
+ * @property {string} reference - Payment reference
+ * @property {number} amount - Payment amount in CHF
+ * @property {boolean} start - Auto-start payment when true (requires reference and amount)
+ * @property {string} apiUrl - Base API URL (default: '/twint')
  * @property {boolean} confirmationNeeded - Whether manual confirmation is required (default: true)
- * @property {boolean} autoPolling - Enable automatic status polling (default: true)
- * @property {number} pollingInterval - Polling interval in ms (default: 2000)
  * 
  * @fires payment-started - When payment is initiated
  * @fires payment-completed - When payment is successfully completed
@@ -43,14 +31,34 @@ export class PayWithTwint extends LitElement {
     amount: { type: Number },
     apiUrl: { type: String, attribute: 'api-url' },
     confirmationNeeded: { type: Boolean, attribute: 'confirmation-needed' },
-    
-    // UI properties
+    merchantName: { type: String, attribute: 'merchant-name' },
+    logoUrl: { type: String, attribute: 'logo-url' },
     theme: { type: String },
-    scale: { type: String },
     
-    // Behavior properties
-    autoPolling: { type: Boolean, attribute: 'auto-polling' },
-    pollingInterval: { type: Number, attribute: 'polling-interval' },
+    // Text literals (customizable)
+    textCancelCheckout: { type: String, attribute: 'text-cancel-checkout' },
+    textScanInstruction: { type: String, attribute: 'text-scan-instruction' },
+    textFollowInstruction: { type: String, attribute: 'text-follow-instruction' },
+    textProcessing: { type: String, attribute: 'text-processing' },
+    textPaymentSuccess: { type: String, attribute: 'text-payment-success' },
+    textThankYou: { type: String, attribute: 'text-thank-you' },
+    textOrderComplete: { type: String, attribute: 'text-order-complete' },
+    textPaymentCancelled: { type: String, attribute: 'text-payment-cancelled' },
+    textOrderCancelled: { type: String, attribute: 'text-order-cancelled' },
+    textMissingOrderData: { type: String, attribute: 'text-missing-order-data' },
+    textErrorPairingToken: { type: String, attribute: 'text-error-pairing-token' },
+    textErrorQrCode: { type: String, attribute: 'text-error-qr-code' },
+    textErrorInvalidQr: { type: String, attribute: 'text-error-invalid-qr' },
+    textOrderIdLabel: { type: String, attribute: 'text-order-id-label' },
+    textReferenceLabel: { type: String, attribute: 'text-reference-label' },
+    textMerchantLabel: { type: String, attribute: 'text-merchant-label' },
+    textTotalAmountLabel: { type: String, attribute: 'text-total-amount-label' },
+    textAmountLabel: { type: String, attribute: 'text-amount-label' },
+    
+    // Control attributes
+    start: { type: Boolean },
+    success: { type: Boolean },
+    cancelled: { type: Boolean },
     
     // Internal state
     order: { type: Object, state: true },
@@ -61,152 +69,460 @@ export class PayWithTwint extends LitElement {
   static styles = css`
     :host {
       display: block;
-      font-family: var(--spectrum-alias-body-text-font-family, adobe-clean, 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      color: #333;
+      box-sizing: border-box;
+      width: 800px;
+    }
+
+    :host([theme='dark']) {
+      color: #e0e0e0;
+    }
+
+    * {
+      box-sizing: border-box;
     }
 
     .container {
-      max-width: 600px;
+      max-width: 800px;
       margin: 0 auto;
-      padding: var(--spectrum-global-dimension-size-300);
+      background: #f5f5f5;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    :host([theme='dark']) .container {
+      background: #2a2a2a;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     }
 
     .header {
-      text-align: center;
-      margin-bottom: var(--spectrum-global-dimension-size-400);
+      background: white;
+      border-bottom: 1px solid #e0e0e0;
     }
 
-    .twint-logo {
-      display: inline-block;
-      margin-bottom: var(--spectrum-global-dimension-size-200);
+    :host([theme='dark']) .header {
+      background: #1a1a1a;
+      border-bottom: 1px solid #444;
     }
 
-    .twint-logo svg {
-      width: 120px;
-      height: auto;
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
     }
 
-    .status-section {
-      margin-top: var(--spectrum-global-dimension-size-200);
+    .cancel-button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: none;
+      border: none;
+      color: #666;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 0;
+      font-family: inherit;
     }
 
-    .qr-section {
-      text-align: center;
-      padding: var(--spectrum-global-dimension-size-400);
+    .cancel-button:hover {
+      color: #000;
+    }
+
+    :host([theme='dark']) .cancel-button {
+      color: #999;
+    }
+
+    :host([theme='dark']) .cancel-button:hover {
+      color: #fff;
+    }
+
+    .cancel-icon {
+      font-size: 20px;
+      font-weight: 300;
+    }
+
+    .twint-logo-header {
+      height: 58px;
+      display: flex;
+      align-items: center;
+    }
+
+    .twint-logo-header svg,
+    .twint-logo-header img {
+      height: 58px;
+      width: auto;
+    }
+
+    .payment-content {
+      display: flex;
+      background: white;
+      padding: 40px;
+      gap: 60px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    :host([theme='dark']) .payment-content {
+      background: #1a1a1a;
+    }
+
+    .payment-left {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .payment-right {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      padding: 40px;
+      background: #f8f8f8;
+      border-radius: 12px;
+      min-width: 200px;
+    }
+
+    :host([theme='dark']) .payment-right {
+      background: #333;
     }
 
     .qr-code-container {
-      display: inline-block;
       background: white;
-      padding: var(--spectrum-global-dimension-size-200);
-      border-radius: var(--spectrum-alias-border-radius-regular);
-      margin-bottom: var(--spectrum-global-dimension-size-200);
+      padding: 16px;
+      border-radius: 8px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    :host([theme='dark']) .qr-code-container {
+      background: #f0f0f0;
     }
 
     .qr-code-container img {
       display: block;
-      width: 250px;
-      height: 250px;
+      width: 240px;
+      height: 240px;
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+      filter: contrast(1.2);
     }
 
-    .qr-placeholder {
-      width: 250px;
-      height: 250px;
+
+    .pairing-token-display {
+      font-size: 28px;
+      font-weight: bold;
+      letter-spacing: 0.15em;
+      color: #000;
+      font-family: 'Courier New', monospace;
+    }
+
+    :host([theme='dark']) .pairing-token-display {
+      color: #fff;
+    }
+
+    .amount-display {
+      background: #000;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .amount-value {
+      font-size: 24px;
+      font-weight: 600;
+    }
+
+    .merchant-name {
+      font-size: 16px;
+      font-weight: 500;
+      color: #333;
+      text-align: center;
+      padding: 8px 16px;
+      background: #d4e4f7;
+      border-radius: 6px;
+    }
+
+    :host([theme='dark']) .merchant-name {
+      color: #e0e0e0;
+      background: #4a5568;
+    }
+
+    .payment-instructions {
       display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #f5f5f5;
-      color: #999;
+      gap: 40px;
+      padding: 30px 40px;
+      background: #f8f8f8;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    :host([theme='dark']) .payment-instructions {
+      background: #2a2a2a;
+      border-top: 1px solid #444;
+    }
+
+    .instruction-left,
+    .instruction-right {
+      flex: 1;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .qr-icon,
+    .user-icon {
+      font-size: 24px;
+      background: white;
+      padding: 12px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    :host([theme='dark']) .qr-icon,
+    :host([theme='dark']) .user-icon {
+      background: #444;
+    }
+
+    .payment-instructions p {
+      margin: 0;
+      color: #666;
       font-size: 14px;
+      line-height: 1.5;
     }
 
-    .pairing-token {
-      font-size: var(--spectrum-global-dimension-font-size-500);
-      font-weight: var(--spectrum-alias-body-text-font-weight-bold);
-      letter-spacing: 0.3em;
-      margin-top: var(--spectrum-global-dimension-size-200);
-      color: var(--spectrum-global-dimension-color-gray-800);
+    :host([theme='dark']) .payment-instructions p {
+      color: #b0b0b0;
     }
 
-    .info-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: var(--spectrum-global-dimension-size-200);
-      margin-top: var(--spectrum-global-dimension-size-300);
-    }
 
-    .info-item {
-      padding: var(--spectrum-global-dimension-size-150);
-      background: var(--spectrum-alias-background-color-gray-100);
-      border-radius: var(--spectrum-alias-border-radius-small);
-    }
 
-    .info-label {
-      font-size: var(--spectrum-global-dimension-font-size-75);
-      color: var(--spectrum-alias-text-color-secondary);
-      margin-bottom: var(--spectrum-global-dimension-size-50);
-    }
-
-    .info-value {
-      font-weight: var(--spectrum-alias-body-text-font-weight-bold);
-      word-break: break-all;
-    }
-
-    .button-group {
-      display: flex;
-      gap: var(--spectrum-global-dimension-size-100);
-      justify-content: center;
-      margin-top: var(--spectrum-global-dimension-size-300);
-      flex-wrap: wrap;
-    }
-
-    .instructions {
-      background: var(--spectrum-alias-background-color-blue-100);
-      padding: var(--spectrum-global-dimension-size-200);
-      border-radius: var(--spectrum-alias-border-radius-regular);
-      margin: var(--spectrum-global-dimension-size-300) 0;
-    }
-
-    .instructions h3 {
-      color: var(--spectrum-alias-text-color-blue);
-      margin-bottom: var(--spectrum-global-dimension-size-100);
-      font-size: var(--spectrum-global-dimension-font-size-200);
-    }
-
-    .instructions ol {
-      margin-left: var(--spectrum-global-dimension-size-300);
-      color: var(--spectrum-alias-text-color);
-      line-height: 1.6;
-    }
-
-    .loading-overlay {
+    .loading-container {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: var(--spectrum-global-dimension-size-600);
+      padding: 60px 20px;
       text-align: center;
     }
 
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #000;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    :host([theme='dark']) .spinner {
+      border: 3px solid #444;
+      border-top: 3px solid #fff;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
     .loading-text {
-      margin-top: var(--spectrum-global-dimension-size-200);
-      color: var(--spectrum-alias-text-color-secondary);
+      color: #6c757d;
+      font-size: 14px;
+    }
+
+    :host([theme='dark']) .loading-text {
+      color: #b0b0b0;
     }
 
     .error-message {
-      background: var(--spectrum-semantic-negative-color-background);
-      color: var(--spectrum-semantic-negative-color-default);
-      padding: var(--spectrum-global-dimension-size-200);
-      border-radius: var(--spectrum-alias-border-radius-regular);
-      margin-top: var(--spectrum-global-dimension-size-200);
+      background: #f8d7da;
+      color: #721c24;
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-top: 16px;
+      font-size: 14px;
     }
 
-    .success-message {
-      background: var(--spectrum-semantic-positive-color-background);
-      color: var(--spectrum-semantic-positive-color-default);
-      padding: var(--spectrum-global-dimension-size-200);
-      border-radius: var(--spectrum-alias-border-radius-regular);
-      margin-top: var(--spectrum-global-dimension-size-200);
+
+    .success-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      text-align: center;
+      background: white;
+    }
+
+    :host([theme='dark']) .success-container {
+      background: #1a1a1a;
+    }
+
+    .success-icon {
+      width: 80px;
+      height: 80px;
+      background: #28a745;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+      animation: scaleIn 0.3s ease-out;
+    }
+
+    .success-icon svg {
+      width: 40px;
+      height: 40px;
+      fill: white;
+    }
+
+    @keyframes scaleIn {
+      0% {
+        transform: scale(0);
+        opacity: 0;
+      }
+      50% {
+        transform: scale(1.1);
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    .success-title {
+      font-size: 28px;
+      font-weight: 600;
+      color: #155724;
+      margin: 0 0 12px 0;
+    }
+
+    .success-subtitle {
+      font-size: 18px;
+      color: #666;
+      margin: 0 0 32px 0;
+    }
+
+    :host([theme='dark']) .success-subtitle {
+      color: #b0b0b0;
+    }
+
+    .order-details {
+      background: #f8f9fa;
+      border-radius: 12px;
+      padding: 24px;
+      margin: 24px 0;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    :host([theme='dark']) .order-details {
+      background: #2a2a2a;
+    }
+
+    .order-detail-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+
+    .order-detail-row:last-child {
+      margin-bottom: 0;
+      padding-top: 12px;
+      border-top: 1px solid #dee2e6;
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    :host([theme='dark']) .order-detail-row:last-child {
+      border-top: 1px solid #444;
+    }
+
+    .order-detail-label {
+      color: #495057;
+    }
+
+    .order-detail-value {
+      color: #212529;
+      font-weight: 500;
+      word-break: break-all;
+    }
+
+    :host([theme='dark']) .order-detail-label {
+      color: #999;
+    }
+
+    :host([theme='dark']) .order-detail-value {
+      color: #e0e0e0;
+    }
+
+    .cancelled-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      text-align: center;
+      background: white;
+    }
+
+    :host([theme='dark']) .cancelled-container {
+      background: #1a1a1a;
+    }
+
+    .cancelled-icon {
+      width: 80px;
+      height: 80px;
+      background: #6c757d;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+      animation: scaleIn 0.3s ease-out;
+    }
+
+    .cancelled-icon svg {
+      width: 40px;
+      height: 40px;
+      fill: white;
+    }
+
+    .cancelled-title {
+      font-size: 28px;
+      font-weight: 600;
+      color: #6c757d;
+      margin: 0 0 12px 0;
+    }
+
+    .cancelled-subtitle {
+      font-size: 18px;
+      color: #666;
+      margin: 0 0 32px 0;
+    }
+
+    :host([theme='dark']) .cancelled-subtitle {
+      color: #b0b0b0;
+    }
+
+    @media (max-width: 480px) {
+      .payment-content {
+        flex-direction: column;
+        gap: 30px;
+      }
+
+      .payment-instructions {
+        flex-direction: column;
+        gap: 20px;
+      }
     }
   `;
 
@@ -216,29 +532,48 @@ export class PayWithTwint extends LitElement {
     // Payment properties
     this.reference = '';
     this.amount = null;
-    this.apiUrl = '/api';
+    this.apiUrl = '/twint';
     this.confirmationNeeded = true;
-    
-    // UI properties
+    this.merchantName = '';
+    this.logoUrl = '';
     this.theme = 'light';
-    this.scale = 'medium';
     
-    // Behavior properties
-    this.autoPolling = true;
-    this.pollingInterval = 2000;
+    // Text literals with defaults
+    this.textCancelCheckout = 'Cancel checkout';
+    this.textScanInstruction = 'Scan this QR Code with your TWINT app to complete the checkout.';
+    this.textFollowInstruction = 'Follow the instructions in the app to confirm your order.';
+    this.textProcessing = 'Processing payment...';
+    this.textPaymentSuccess = 'Payment Successful!';
+    this.textThankYou = 'Thank you for your payment';
+    this.textOrderComplete = 'Your order has been completed successfully.';
+    this.textPaymentCancelled = 'Payment Cancelled';
+    this.textOrderCancelled = 'Your order has been cancelled.';
+    this.textMissingOrderData = 'Missing order data';
+    this.textErrorPairingToken = 'Error: Pairing token not received';
+    this.textErrorQrCode = 'Error: QR code not received from TWINT API';
+    this.textErrorInvalidQr = 'Error: Invalid QR code format received';
+    this.textOrderIdLabel = 'Order ID';
+    this.textReferenceLabel = 'Reference';
+    this.textMerchantLabel = 'Merchant';
+    this.textTotalAmountLabel = 'Total Amount';
+    this.textAmountLabel = 'Amount';
+    
+    // Control attributes
+    this.start = false;
+    this.success = false;
+    this.cancelled = false;
     
     // Internal state
     this.order = null;
     this.status = 'idle'; // idle, loading, active, success, failed, cancelled
     this.loading = false;
-    
   }
 
   connectedCallback() {
     super.connectedCallback();
     
-    // Auto-start payment if reference and amount are provided
-    if (this.reference && this.amount) {
+    // Only auto-start payment if start attribute is present along with reference and amount
+    if (this.start && this.reference && this.amount) {
       this.#autoStartPayment();
     }
   }
@@ -251,31 +586,59 @@ export class PayWithTwint extends LitElement {
   attributeChangedCallback(name, oldVal, newVal) {
     super.attributeChangedCallback(name, oldVal, newVal);
     
-    // If reference or amount changes and both are set, auto-start payment
-    if ((name === 'reference' || name === 'amount') && this.reference && this.amount && !this.order) {
+    // Only auto-start if start attribute is present and reference/amount are set
+    if ((name === 'reference' || name === 'amount' || name === 'start') && 
+        this.start && this.reference && this.amount && !this.order) {
       this.#autoStartPayment();
     }
   }
 
   render() {
+    // Don't render anything until payment is initiated (unless success or cancelled is set for testing)
+    if (!this.order && !this.loading && !this.success && !this.cancelled) {
+      return '';
+    }
+
     return html`
-      <sp-theme theme="spectrum" scale="${this.scale}" color="${this.theme}">
-        <div class="container">
-          ${this.renderHeader()}
-          ${this.renderContent()}
-        </div>
-      </sp-theme>
+      <div class="container">
+        ${this.renderHeader()}
+        ${this.renderContent()}
+      </div>
     `;
   }
 
   renderHeader() {
+    const isSuccess = this.success || this.status === 'success' || this.order?.status === 'SUCCESS' || this.order?.status === 'CONFIRMED';
+    const isCancelled = this.cancelled || this.status === 'cancelled' || this.order?.status === 'CANCELLED';
+    const hideCancel = isSuccess || isCancelled;
+    
     return html`
       <div class="header">
-        <div class="twint-logo">
-          ${this.renderTwintLogo()}
+        <div class="header-top">
+          ${!hideCancel ? html`
+            <button class="cancel-button" @click="${() => this.cancelPayment()}">
+              <span class="cancel-icon">×</span>
+              <span>${this.textCancelCheckout}</span>
+            </button>
+          ` : html`
+            <div></div>
+          `}
+          <div class="twint-logo-header">
+            ${this.renderTwintLogo()}
+          </div>
         </div>
-        <h2>TWINT Payment</h2>
       </div>
+    `;
+  }
+
+  renderStatusBadge() {
+    if (!this.order) return '';
+    
+    const statusClass = this.getStatusClass();
+    const statusLabel = this.getStatusLabel();
+    
+    return html`
+      <div class="status-badge ${statusClass}">${statusLabel}</div>
     `;
   }
 
@@ -284,8 +647,14 @@ export class PayWithTwint extends LitElement {
       return this.renderLoading();
     }
 
-    if (!this.order) {
-      return this.renderNoOrder();
+    // Show success screen for completed orders or when success attribute is set (for testing)
+    if (this.success || this.status === 'success' || this.order?.status === 'SUCCESS' || this.order?.status === 'CONFIRMED') {
+      return this.renderSuccessScreen();
+    }
+
+    // Show cancelled screen for cancelled orders or when cancelled attribute is set (for testing)
+    if (this.cancelled || this.status === 'cancelled' || this.order?.status === 'CANCELLED') {
+      return this.renderCancelledScreen();
     }
 
     return this.renderPaymentStatus();
@@ -293,150 +662,209 @@ export class PayWithTwint extends LitElement {
 
   renderLoading() {
     return html`
-      <div class="loading-overlay">
-        <sp-progress-circle indeterminate size="l"></sp-progress-circle>
-        <div class="loading-text">Processing payment...</div>
+      <div class="loading-container">
+        <div class="spinner"></div>
+        <div class="loading-text">${this.textProcessing}</div>
       </div>
     `;
   }
 
-  renderNoOrder() {
+  renderSuccessScreen() {
+    // Only show success screen if we have order data or required attributes
+    if (!this.order && (!this.reference || !this.amount)) {
+      return html`<div class="error-message">${this.textMissingOrderData}</div>`;
+    }
+    
+    const orderId = this.order?.id;
+    const reference = this.order?.reference || this.reference;
+    const amount = this.order?.amount?.value || this.amount;
+    
     return html`
-      <sp-card>
-        <div slot="heading">No Active Payment</div>
-        <p>Waiting for payment to be initiated...</p>
-        ${this.reference ? html`
-          <div class="info-grid">
-            <div class="info-item">
-              <div class="info-label">Reference</div>
-              <div class="info-value">${this.reference}</div>
+      <div class="success-container">
+        <div class="success-icon">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+          </svg>
+        </div>
+        <h2 class="success-title">${this.textPaymentSuccess}</h2>
+        <p class="success-subtitle">${this.textThankYou}</p>
+        
+        <div class="order-details">
+          ${orderId ? html`
+            <div class="order-detail-row">
+              <span class="order-detail-label">${this.textOrderIdLabel}</span>
+              <span class="order-detail-value">${orderId}</span>
             </div>
-            ${this.amount ? html`
-              <div class="info-item">
-                <div class="info-label">Amount</div>
-                <div class="info-value">CHF ${this.amount.toFixed(2)}</div>
-              </div>
-            ` : ''}
+          ` : ''}
+          <div class="order-detail-row">
+            <span class="order-detail-label">${this.textReferenceLabel}</span>
+            <span class="order-detail-value">${reference}</span>
           </div>
-        ` : ''}
-      </sp-card>
+          <div class="order-detail-row">
+            <span class="order-detail-label">${this.textMerchantLabel}</span>
+            <span class="order-detail-value">${this.merchantName || 'Night Shop'}</span>
+          </div>
+          <div class="order-detail-row">
+            <span class="order-detail-label">${this.textTotalAmountLabel}</span>
+            <span class="order-detail-value">CHF ${Number(amount).toFixed(2)}</span>
+          </div>
+        </div>
+        
+        <p class="success-subtitle">${this.textOrderComplete}</p>
+      </div>
+    `;
+  }
+
+  renderCancelledScreen() {
+    const reference = this.order?.reference || this.reference || '';
+    const amount = this.order?.amount?.value || this.amount || 0;
+    
+    return html`
+      <div class="cancelled-container">
+        <div class="cancelled-icon">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </div>
+        <h2 class="cancelled-title">${this.textPaymentCancelled}</h2>
+        <p class="cancelled-subtitle">${this.textOrderCancelled}</p>
+        
+        <div class="order-details">
+          ${reference ? html`
+            <div class="order-detail-row">
+              <span class="order-detail-label">${this.textReferenceLabel}</span>
+              <span class="order-detail-value">${reference}</span>
+            </div>
+          ` : ''}
+          ${this.merchantName ? html`
+            <div class="order-detail-row">
+              <span class="order-detail-label">${this.textMerchantLabel}</span>
+              <span class="order-detail-value">${this.merchantName}</span>
+            </div>
+          ` : ''}
+          ${amount ? html`
+            <div class="order-detail-row">
+              <span class="order-detail-label">${this.textAmountLabel}</span>
+              <span class="order-detail-value">CHF ${Number(amount).toFixed(2)}</span>
+            </div>
+          ` : ''}
+        </div>
+      </div>
     `;
   }
 
   renderPaymentStatus() {
-    const statusIcon = this.getStatusIcon();
-    const statusColor = this.getStatusColor();
-
+    // Always render QR code section - it will show error if missing
     return html`
-      <sp-card class="status-section">
-        <div slot="heading">
-          Payment Status
-          <span style="float: right; color: ${statusColor}">
-            ${statusIcon} ${this.getStatusLabel()}
-          </span>
+      <div class="payment-content">
+        <div class="payment-left">
+          ${this.renderQRCode()}
+          ${this.order.pairingToken ? html`
+            <div class="pairing-token-display">
+              ${this.formatPairingToken(this.order.pairingToken)}
+            </div>
+          ` : html`
+            <div class="error-message">
+              ${this.textErrorPairingToken}
+            </div>
+          `}
         </div>
-
-        ${this.shouldShowInstructions() ? this.renderPaymentInstructions() : ''}
-        ${this.order.qrCode ? this.renderQRCode() : ''}
-        
-        <div class="info-grid">
-          <div class="info-item">
-            <div class="info-label">Order ID</div>
-            <div class="info-value">${this.order.id || '-'}</div>
+        <div class="payment-right">
+          <div class="amount-display">
+            <span class="amount-value">${this.order.amount?.value?.toFixed(0) || '0'} CHF</span>
           </div>
-          <div class="info-item">
-            <div class="info-label">Reference</div>
-            <div class="info-value">${this.order.reference || '-'}</div>
-          </div>
-          <div class="info-item">
-            <div class="info-label">Amount</div>
-            <div class="info-value">CHF ${this.order.amount?.value?.toFixed(2) || '0.00'}</div>
-          </div>
-          <div class="info-item">
-            <div class="info-label">Status</div>
-            <div class="info-value">${this.getStatusLabel()}</div>
+          <div class="merchant-name">
+            ${this.merchantName}
           </div>
         </div>
-
-        ${this.renderActionButtons()}
-      </sp-card>
-    `;
-  }
-
-  renderPaymentInstructions() {
-    return html`
-      <div class="instructions">
-        <h3>How to Pay</h3>
-        <ol>
-          <li>Open the TWINT app on your mobile phone</li>
-          <li>Scan the QR code below OR enter the pairing token</li>
-          <li>Confirm the payment in your TWINT app</li>
-        </ol>
+      </div>
+      <div class="payment-instructions">
+        <div class="instruction-left">
+          <div class="qr-icon">📱</div>
+          <p>${this.textScanInstruction}</p>
+        </div>
+        <div class="instruction-right">
+          <div class="user-icon">👤</div>
+          <p>${this.textFollowInstruction}</p>
+        </div>
       </div>
     `;
   }
 
+
   renderQRCode() {
-    return html`
-      <div class="qr-section">
-        <div class="qr-code-container">
-          ${this.order.qrCode.startsWith('data:image') ? html`
-            <img src="${this.order.qrCode}" alt="TWINT QR Code" />
-          ` : html`
-            <div class="qr-placeholder">QR Code Loading...</div>
-          `}
+    if (!this.order.qrCode) {
+      return html`
+        <div class="error-message">
+          ${this.textErrorQrCode}
         </div>
-        ${this.order.pairingToken ? html`
-          <div>
-            <div class="info-label">Pairing Token</div>
-            <div class="pairing-token">
-              ${this.formatPairingToken(this.order.pairingToken)}
-            </div>
-          </div>
-        ` : ''}
+      `;
+    }
+
+    if (!this.order.qrCode.startsWith('data:image')) {
+      return html`
+        <div class="error-message">
+          ${this.textErrorInvalidQr}
+        </div>
+      `;
+    }
+
+    return html`
+      <div class="qr-code-container">
+        <img src="${this.order.qrCode}" alt="TWINT QR Code" />
+      </div>
+    `;
+  }
+
+  renderOrderInfo() {
+    return html`
+      <div class="info-grid">
+        <div class="info-item">
+          <div class="info-label">Order ID</div>
+          <div class="info-value">${this.order.id || '-'}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Reference</div>
+          <div class="info-value">${this.order.reference || '-'}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Amount</div>
+          <div class="info-value">CHF ${this.order.amount?.value?.toFixed(2) || '0.00'}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Status</div>
+          <div class="info-value">${this.getStatusLabel()}</div>
+        </div>
       </div>
     `;
   }
 
   renderActionButtons() {
-    const buttons = [];
+    if (!this.isPaymentActive()) return '';
 
-    if (this.isPaymentActive()) {
-      if (this.order.status === 'PENDING_CONFIRMATION') {
-        buttons.push(html`
-          <sp-button variant="accent" @click="${() => this.confirmPayment()}">
+    return html`
+      <div class="button-group">
+        ${this.order.status === 'PENDING_CONFIRMATION' ? html`
+          <button class="btn-primary" @click="${() => this.confirmPayment()}">
             Confirm Payment
-          </sp-button>
-        `);
-      }
-
-      buttons.push(html`
-        <sp-button variant="secondary" @click="${() => this.checkStatus()}">
-          ${this.#isPolling ? html`
-            <sp-progress-circle indeterminate size="s"></sp-progress-circle>
-            Monitoring...
-          ` : 'Check Status'}
-        </sp-button>
-      `);
-
-      buttons.push(html`
-        <sp-button variant="negative" @click="${() => this.cancelPayment()}">
+          </button>
+        ` : ''}
+        <button class="btn-danger" @click="${() => this.cancelPayment()}">
           Cancel Payment
-        </sp-button>
-      `);
-    }
-
-    return buttons.length > 0 ? html`
-      <sp-divider></sp-divider>
-      <div class="button-group">${buttons}</div>
-    ` : '';
+        </button>
+      </div>
+    `;
   }
 
   renderTwintLogo() {
+    if (this.logoUrl) {
+      return html`<img src="${this.logoUrl}" alt="TWINT" />`;
+    }
+    
     return html`
-      <svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-        <rect width="512" height="512" rx="64" fill="#000"/>
-        <path fill="#fff" d="M120 200h80v40h-80v80h-40v-80h-40v-40h40v-80h40v80zm140-80h40v200h-40V120zm80 0h40v80h80v40h-80v80h-40v-80h-80v-40h80v-80zm-160 0h40v200h-40V120z"/>
+      <svg width="120" height="40" viewBox="0 0 120 40" xmlns="http://www.w3.org/2000/svg">
+        <rect width="120" height="40" rx="4" fill="#000"/>
+        <text x="60" y="28" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="white" text-anchor="middle">TWINT</text>
       </svg>
     `;
   }
@@ -480,9 +908,8 @@ export class PayWithTwint extends LitElement {
         composed: true
       }));
 
-      if (this.autoPolling) {
-        this.startPolling();
-      }
+      // Start polling automatically
+      this.startPolling();
       
       return this.order;
     } catch (error) {
@@ -495,42 +922,6 @@ export class PayWithTwint extends LitElement {
       throw error;
     } finally {
       this.loading = false;
-    }
-  }
-
-  /**
-   * Check payment status
-   */
-  async checkStatus() {
-    if (!this.order) return;
-
-    try {
-      const endpoint = `${this.apiUrl}/orders/${this.order.id}`;
-      const response = await fetch(endpoint);
-      const data = await response.json();
-      
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to check status');
-      }
-
-      this.order = data.data;
-      
-      this.dispatchEvent(new CustomEvent('status-changed', { 
-        detail: this.order,
-        bubbles: true,
-        composed: true
-      }));
-
-      this.#handleStatusUpdate(this.order);
-      
-      return this.order;
-    } catch (error) {
-      this.dispatchEvent(new CustomEvent('payment-error', { 
-        detail: { error: error.message },
-        bubbles: true,
-        composed: true
-      }));
-      throw error;
     }
   }
 
@@ -646,11 +1037,27 @@ export class PayWithTwint extends LitElement {
       }
 
       try {
-        await this.checkStatus();
+        const endpoint = `${this.apiUrl}/orders/${this.order.id}`;
+        const response = await fetch(endpoint);
+        const data = await response.json();
+        
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to check status');
+        }
+
+        this.order = data.data;
+        
+        this.dispatchEvent(new CustomEvent('status-changed', { 
+          detail: this.order,
+          bubbles: true,
+          composed: true
+        }));
+
+        this.#handleStatusUpdate(this.order);
       } catch (error) {
         console.error('Polling error:', error);
       }
-    }, this.pollingInterval);
+    }, 2000); // Poll every 2 seconds
   }
 
   /**
@@ -734,9 +1141,9 @@ export class PayWithTwint extends LitElement {
     const statusLabels = {
       'IN_PROGRESS': 'In Progress',
       'PENDING_CONFIRMATION': 'Pending Confirmation',
-      'SUCCESS': 'Success',
+      'SUCCESS': 'Payment Successful',
       'CONFIRMED': 'Confirmed',
-      'FAILED': 'Failed',
+      'FAILED': 'Payment Failed',
       'CANCELLED': 'Cancelled',
       'TIMEOUT': 'Timeout'
     };
@@ -744,35 +1151,21 @@ export class PayWithTwint extends LitElement {
     return statusLabels[this.order.status] || this.order.status;
   }
 
-  getStatusIcon() {
+  getStatusClass() {
     if (!this.order) return '';
     
     switch (this.order.status) {
       case 'SUCCESS':
       case 'CONFIRMED':
-        return html`<sp-icon-checkmark-circle></sp-icon-checkmark-circle>`;
+        return 'success';
       case 'FAILED':
       case 'CANCELLED':
       case 'TIMEOUT':
-        return html`<sp-icon-close-circle></sp-icon-close-circle>`;
+        return 'failed';
+      case 'PENDING_CONFIRMATION':
+        return 'pending';
       default:
-        return html`<sp-icon-alert></sp-icon-alert>`;
-    }
-  }
-
-  getStatusColor() {
-    if (!this.order) return 'var(--spectrum-alias-text-color)';
-    
-    switch (this.order.status) {
-      case 'SUCCESS':
-      case 'CONFIRMED':
-        return 'var(--spectrum-semantic-positive-color-default)';
-      case 'FAILED':
-      case 'CANCELLED':
-      case 'TIMEOUT':
-        return 'var(--spectrum-semantic-negative-color-default)';
-      default:
-        return 'var(--spectrum-semantic-informative-color-default)';
+        return 'in-progress';
     }
   }
 

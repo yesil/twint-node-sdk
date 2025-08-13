@@ -2,6 +2,7 @@ import { TwintSoapClient } from '../soap/SoapClient.js';
 import { OrderStatus } from '../values/OrderStatus.js';
 import { OrderId, StoreUuid } from '../values/Uuid.js';
 import { FiledMerchantTransactionReference } from '../values/MerchantTransactionReference.js';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Main TWINT SDK client
@@ -9,19 +10,143 @@ import { FiledMerchantTransactionReference } from '../values/MerchantTransaction
 export class TwintClient {
   #soapClient;
   #storeUuid;
+  #cashRegisterId;
+  #enrollmentDetails;
+  #initialized;
 
   /**
    * @param {Object} config
    * @param {import('../certificates/Certificate.js').CertificateContainer} config.certificate
    * @param {string|import('../values/Uuid.js').StoreUuid} config.storeUuid
    * @param {import('../values/Environment.js').Environment} config.environment
+   * @param {string} config.cashRegisterId Required cash register ID
    * @param {string} [config.version='v8.6']
    */
   constructor(config) {
-    const { certificate, storeUuid, environment, version = 'v8.6' } = config;
+    const { 
+      certificate, 
+      storeUuid, 
+      environment, 
+      cashRegisterId,
+      version = 'v8.6'
+    } = config;
+
+    if (!cashRegisterId) {
+      throw new Error('cashRegisterId is required');
+    }
 
     this.#soapClient = new TwintSoapClient(certificate, environment, version);
     this.#storeUuid = typeof storeUuid === 'string' ? StoreUuid.fromString(storeUuid) : storeUuid;
+    this.#cashRegisterId = cashRegisterId;
+    this.#enrollmentDetails = null;
+    this.#initialized = true; // No need for async initialization anymore
+  }
+
+
+  /**
+   * Set the cash register ID for subsequent operations
+   * @param {string} cashRegisterId
+   */
+  setCashRegisterId(cashRegisterId) {
+    this.#cashRegisterId = cashRegisterId;
+  }
+
+  /**
+   * Generate SOAP headers for TWINT requests
+   * @private
+   * @returns {Object} The SOAP headers
+   */
+  #generateHeaders() {
+    return {
+      RequestHeaderElement: {
+        MessageId: uuidv4(),
+        ClientSoftwareName: 'TWINT PHP SDK',
+        ClientSoftwareVersion: '1.6.2',
+        attributes: {
+          xmlns: 'http://service.twint.ch/header/types/v8_6'
+        }
+      }
+    };
+  }
+
+  /**
+   * Enroll cash register
+   * @param {string} [cashRegisterType='EPOS'] Type of cash register (EPOS, POS-Serviced, POS-Selfservice, POS-VendingMachine, MPOS)
+   * @param {string} [formerCashRegisterId] Optional former cash register ID for re-enrollment
+   * @returns {Promise<Object>}
+   */
+  async enrollCashRegister(cashRegisterType = 'EPOS', formerCashRegisterId = null) {
+    try {
+      // Generate a cash register ID if not re-enrolling
+      // Format: wc|{node_version},{npm_version}|{sdk_version}|D|{unique_id}
+      // Example: wc|10.1.0,6.8.2|1.5.1|D|bddbddf1
+      const nodeVersion = process.version.replace('v', '');
+      const uniqueId = Math.random().toString(16).substring(2, 10);
+      const generatedCashRegisterId = formerCashRegisterId || 
+        `wc|${nodeVersion},8.0.0|1.0.0|D|${uniqueId}`;
+
+      const request = {
+        MerchantInformation: {
+          MerchantUuid: this.#storeUuid.toString(),
+          CashRegisterId: generatedCashRegisterId,
+        },
+        CashRegisterType: cashRegisterType,
+      };
+
+      // Add FormerCashRegisterId if re-enrolling
+      if (formerCashRegisterId) {
+        request.FormerCashRegisterId = formerCashRegisterId;
+      }
+
+      // EnrollCashRegister needs headers
+      const headers = this.#generateHeaders();
+      const response = await this.#soapClient.enrollCashRegister(request, headers);
+
+      if (!response || !response.BeaconSecurity) {
+        throw new Error('Invalid response from TWINT API');
+      }
+
+      const beaconSecurity = response.BeaconSecurity;
+      
+      // Store the cash register ID we used for enrollment
+      this.#cashRegisterId = generatedCashRegisterId;
+      
+      return {
+        beaconUuid: beaconSecurity.BeaconUuid,
+        majorId: beaconSecurity.MajorId,
+        minorId: beaconSecurity.MinorId,
+        beaconInitString: beaconSecurity.BeaconInitString,
+        beaconSecret: beaconSecurity.BeaconSecret,
+        cashRegisterId: generatedCashRegisterId, // Return the ID we generated/used
+      };
+    } catch (error) {
+      throw new Error(`Failed to enroll cash register: ${error.message}`);
+    }
+  }
+
+  /**
+   * Build merchant information with optional cash register ID
+   * @private
+   * @returns {Object}
+   */
+  #buildMerchantInformation() {
+    const merchantInfo = {
+      MerchantUuid: this.#storeUuid.toString(),
+    };
+    
+    if (this.#cashRegisterId) {
+      merchantInfo.CashRegisterId = this.#cashRegisterId;
+    }
+    
+    return merchantInfo;
+  }
+
+  /**
+   * Get enrollment details
+   * @returns {Object|null} The enrollment details if enrolled
+   */
+  getEnrollmentDetails() {
+    return this.#enrollmentDetails;
   }
 
   /**
@@ -31,12 +156,10 @@ export class TwintClient {
   async checkSystemStatus() {
     try {
       const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-        },
+        MerchantInformation: this.#buildMerchantInformation(),
       };
 
-      const response = await this.#soapClient.checkSystemStatus(request);
+      const response = await this.#soapClient.checkSystemStatus(request, this.#generateHeaders());
       
       if (!response) {
         throw new Error('Empty response from TWINT API');
@@ -64,30 +187,56 @@ export class TwintClient {
       const merchantRef = typeof reference === 'string' ? reference : reference.value;
 
       const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-        },
+        MerchantInformation: this.#buildMerchantInformation(),
         Order: {
+          PostingType: 'GOODS',
           RequestedAmount: {
             Amount: amount.amount,
             Currency: amount.currency,
           },
           MerchantTransactionReference: merchantRef,
-          Type: 'PAYMENT_IMMEDIATE',
-          PostingType: 'GOODS',
-          ConfirmationNeeded: confirmationNeeded,
+          attributes: {
+            type: 'PAYMENT_IMMEDIATE',
+            confirmationNeeded: confirmationNeeded,
+          },
         },
-        QRCodeRendering: true,
         UnidentifiedCustomer: true,
+        QRCodeRendering: true,
       };
 
-      const response = await this.#soapClient.startOrder(request);
+      const response = await this.#soapClient.startOrder(request, this.#generateHeaders());
+
+      // Handle different possible response structures from SOAP
+      let statusValue, reasonValue;
+      
+      // Check different possible paths for Status value
+      if (response.OrderStatus?.Status?.$value) {
+        statusValue = response.OrderStatus.Status.$value;
+      } else if (response.OrderStatus?.Status?._) {
+        statusValue = response.OrderStatus.Status._;
+      } else if (typeof response.OrderStatus?.Status === 'string') {
+        statusValue = response.OrderStatus.Status;
+      } else {
+        console.error('OrderStatus structure:', JSON.stringify(response.OrderStatus, null, 2));
+        throw new Error('Unable to parse OrderStatus from response');
+      }
+
+      // Check different possible paths for Reason value
+      if (response.OrderStatus?.Reason?.$value) {
+        reasonValue = response.OrderStatus.Reason.$value;
+      } else if (response.OrderStatus?.Reason?._) {
+        reasonValue = response.OrderStatus.Reason._;
+      } else if (typeof response.OrderStatus?.Reason === 'string') {
+        reasonValue = response.OrderStatus.Reason;
+      } else {
+        reasonValue = 'UNKNOWN';
+      }
 
       return {
         id: OrderId.fromString(response.OrderUuid),
         merchantTransactionReference: FiledMerchantTransactionReference.fromString(merchantRef),
-        status: OrderStatus.fromString(response.OrderStatus.Status._),
-        transactionStatus: response.OrderStatus.Reason._,
+        status: OrderStatus.fromString(statusValue),
+        transactionStatus: reasonValue,
         amount: amount,
         pairingStatus: response.PairingStatus,
         pairingToken: response.Token,
@@ -110,10 +259,7 @@ export class TwintClient {
         .match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 
       const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-        },
-        WaitForResponse: false,
+        MerchantInformation: this.#buildMerchantInformation(),
       };
 
       if (isUuid) {
@@ -121,17 +267,44 @@ export class TwintClient {
       } else {
         request.MerchantTransactionReference = orderIdOrReference.toString();
       }
+      
+      request.WaitForResponse = false;
 
-      const response = await this.#soapClient.monitorOrder(request);
+      const response = await this.#soapClient.monitorOrder(request, this.#generateHeaders());
       const order = response.Order;
+
+      // Handle different possible response structures from SOAP
+      let statusValue, reasonValue;
+      
+      // Check different possible paths for Status value
+      if (order.Status?.Status?.$value) {
+        statusValue = order.Status.Status.$value;
+      } else if (order.Status?.Status?._) {
+        statusValue = order.Status.Status._;
+      } else if (typeof order.Status?.Status === 'string') {
+        statusValue = order.Status.Status;
+      } else {
+        statusValue = 'UNKNOWN';
+      }
+
+      // Check different possible paths for Reason value
+      if (order.Status?.Reason?.$value) {
+        reasonValue = order.Status.Reason.$value;
+      } else if (order.Status?.Reason?._) {
+        reasonValue = order.Status.Reason._;
+      } else if (typeof order.Status?.Reason === 'string') {
+        reasonValue = order.Status.Reason;
+      } else {
+        reasonValue = 'UNKNOWN';
+      }
 
       return {
         id: OrderId.fromString(order.Uuid),
         merchantTransactionReference: FiledMerchantTransactionReference.fromString(
           order.MerchantTransactionReference,
         ),
-        status: OrderStatus.fromString(order.Status.Status._),
-        transactionStatus: order.Status.Reason._,
+        status: OrderStatus.fromString(statusValue),
+        transactionStatus: reasonValue,
         amount: {
           amount: order.RequestedAmount.Amount,
           currency: order.RequestedAmount.Currency,
@@ -153,9 +326,7 @@ export class TwintClient {
   async confirmOrder(orderId, amount) {
     try {
       const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-        },
+        MerchantInformation: this.#buildMerchantInformation(),
         OrderUuid: orderId.toString(),
         RequestedAmount: {
           Amount: amount.amount,
@@ -163,13 +334,37 @@ export class TwintClient {
         },
       };
 
-      const response = await this.#soapClient.confirmOrder(request);
+      const response = await this.#soapClient.confirmOrder(request, this.#generateHeaders());
       const order = response.Order;
+
+      // Handle different possible response structures from SOAP
+      let statusValue = 'CONFIRMED';
+      let reasonValue = 'CONFIRMED';
+      
+      if (order?.Status) {
+        // Check different possible paths for Status value
+        if (order.Status?.Status?.$value) {
+          statusValue = order.Status.Status.$value;
+        } else if (order.Status?.Status?._) {
+          statusValue = order.Status.Status._;
+        } else if (typeof order.Status?.Status === 'string') {
+          statusValue = order.Status.Status;
+        }
+
+        // Check different possible paths for Reason value
+        if (order.Status?.Reason?.$value) {
+          reasonValue = order.Status.Reason.$value;
+        } else if (order.Status?.Reason?._) {
+          reasonValue = order.Status.Reason._;
+        } else if (typeof order.Status?.Reason === 'string') {
+          reasonValue = order.Status.Reason;
+        }
+      }
 
       return {
         id: OrderId.fromString(order.Uuid),
-        status: OrderStatus.fromString(order.Status.Status._),
-        transactionStatus: order.Status.Reason._,
+        status: OrderStatus.fromString(statusValue),
+        transactionStatus: reasonValue,
         confirmed: true,
       };
     } catch (error) {
@@ -185,14 +380,11 @@ export class TwintClient {
   async cancelOrder(orderId) {
     try {
       const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-        },
+        MerchantInformation: this.#buildMerchantInformation(),
         OrderUuid: orderId.toString(),
-        Reason: 'PAYMENT_ABORT',
       };
 
-      const response = await this.#soapClient.cancelOrder(request);
+      const response = await this.#soapClient.cancelOrder(request, this.#generateHeaders());
 
       return {
         id: orderId,
@@ -220,32 +412,58 @@ export class TwintClient {
         typeof reversalReference === 'string' ? reversalReference : reversalReference.value;
 
       const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-        },
+        MerchantInformation: this.#buildMerchantInformation(),
         Order: {
+          PostingType: 'GOODS',
           RequestedAmount: {
             Amount: amount.amount,
             Currency: amount.currency,
           },
           MerchantTransactionReference: merchantRef,
-          Type: 'REVERSAL',
-          PostingType: 'GOODS',
           LinkedOrderUuid: originalOrderId.toString(),
+          attributes: {
+            type: 'REVERSAL',
+            confirmationNeeded: false,
+          },
         },
         ReversalReason: reason,
       };
 
-      const response = await this.#soapClient.startOrder(request);
+      const response = await this.#soapClient.startOrder(request, this.#generateHeaders());
+
+      // Handle different possible response structures from SOAP
+      let statusValue, reasonValue;
+      
+      // Check different possible paths for Status value
+      if (response.OrderStatus?.Status?.$value) {
+        statusValue = response.OrderStatus.Status.$value;
+      } else if (response.OrderStatus?.Status?._) {
+        statusValue = response.OrderStatus.Status._;
+      } else if (typeof response.OrderStatus?.Status === 'string') {
+        statusValue = response.OrderStatus.Status;
+      } else {
+        statusValue = 'UNKNOWN';
+      }
+
+      // Check different possible paths for Reason value
+      if (response.OrderStatus?.Reason?.$value) {
+        reasonValue = response.OrderStatus.Reason.$value;
+      } else if (response.OrderStatus?.Reason?._) {
+        reasonValue = response.OrderStatus.Reason._;
+      } else if (typeof response.OrderStatus?.Reason === 'string') {
+        reasonValue = response.OrderStatus.Reason;
+      } else {
+        reasonValue = 'UNKNOWN';
+      }
 
       return {
         id: OrderId.fromString(response.OrderUuid),
         merchantTransactionReference: FiledMerchantTransactionReference.fromString(merchantRef),
-        status: OrderStatus.fromString(response.OrderStatus.Status._),
-        transactionStatus: response.OrderStatus.Reason._,
+        status: OrderStatus.fromString(statusValue),
+        transactionStatus: reasonValue,
         amount: amount,
         originalOrderId: originalOrderId,
-        reversalSuccessful: response.OrderStatus.Status._ === 'SUCCESS',
+        reversalSuccessful: statusValue === 'SUCCESS',
       };
     } catch (error) {
       throw new Error(`Failed to reverse order: ${error.message}`);
@@ -263,9 +481,7 @@ export class TwintClient {
   async requestFastCheckoutCheckIn({ amount, requestedScopes, shippingMethods }) {
     try {
       const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-        },
+        MerchantInformation: this.#buildMerchantInformation(),
         RequestedAmount: {
           Amount: amount.amount,
           Currency: amount.currency,
@@ -282,7 +498,7 @@ export class TwintClient {
         QRCodeRendering: true,
       };
 
-      const response = await this.#soapClient.requestFastCheckoutCheckIn(request);
+      const response = await this.#soapClient.requestFastCheckoutCheckIn(request, this.#generateHeaders());
 
       return {
         pairingUuid: response.PairingUuid,
@@ -303,14 +519,12 @@ export class TwintClient {
   async monitorFastCheckoutCheckIn(pairingUuid) {
     try {
       const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-        },
+        MerchantInformation: this.#buildMerchantInformation(),
         PairingUuid: pairingUuid,
         WaitForResponse: false,
       };
 
-      const response = await this.#soapClient.monitorFastCheckoutCheckIn(request);
+      const response = await this.#soapClient.monitorFastCheckoutCheckIn(request, this.#generateHeaders());
 
       return {
         pairingUuid: pairingUuid,
@@ -332,13 +546,11 @@ export class TwintClient {
   async cancelFastCheckoutCheckIn(pairingUuid) {
     try {
       const request = {
-        MerchantInformation: {
-          MerchantUuid: this.#storeUuid.toString(),
-        },
+        MerchantInformation: this.#buildMerchantInformation(),
         PairingUuid: pairingUuid,
       };
 
-      const response = await this.#soapClient.cancelCheckIn(request);
+      const response = await this.#soapClient.cancelCheckIn(request, this.#generateHeaders());
 
       return {
         pairingUuid: pairingUuid,
