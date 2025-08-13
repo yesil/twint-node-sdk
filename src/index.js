@@ -19,3 +19,6 @@ export {
 
 // SOAP Client (for advanced usage)
 export { TwintSoapClient } from './soap/SoapClient.js';
+
+// Crypto utilities
+export { CryptoUtil } from './utils/crypto.js';

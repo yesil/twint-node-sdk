@@ -3,7 +3,6 @@ import cors from 'cors';
 import path from 'path';
 import dotenv from 'dotenv';
 import winston from 'winston';
-import QRCode from 'qrcode';
 import {
   TwintClient,
   Environment,

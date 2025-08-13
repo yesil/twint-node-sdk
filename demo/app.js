@@ -5,13 +5,12 @@
  */
 
 // Import the pay-with-twint component
-import '../src/components/pay-with-twint.js';
+import '../src/pay-with-twint.js';
 
 class TwintDemo {
   constructor() {
     this.component = document.getElementById('payment-component');
     this.eventLog = document.getElementById('event-log');
-    this.startButton = document.getElementById('start-payment');
     this.referenceInput = document.getElementById('reference');
     this.amountInput = document.getElementById('amount');
     this.confirmationSelect = document.getElementById('confirmation');
@@ -28,31 +27,36 @@ class TwintDemo {
   }
   
   attachFormHandlers() {
-    this.startButton?.addEventListener('click', () => this.handleStartPayment());
+    // Update component attributes when form fields change
+    this.referenceInput?.addEventListener('input', () => {
+      if (this.component) {
+        this.component.reference = this.referenceInput.value.trim();
+      }
+    });
+    
+    this.amountInput?.addEventListener('input', () => {
+      const value = parseFloat(this.amountInput.value);
+      if (this.component && !isNaN(value)) {
+        this.component.amount = value;
+      }
+    });
+    
+    this.confirmationSelect?.addEventListener('change', () => {
+      if (this.component) {
+        this.component.confirmationNeeded = this.confirmationSelect.value === 'true';
+      }
+    });
     
     // Auto-format amount on blur
     this.amountInput?.addEventListener('blur', () => {
       const value = parseFloat(this.amountInput.value);
       if (!isNaN(value)) {
         this.amountInput.value = value.toFixed(2);
+        if (this.component) {
+          this.component.amount = value;
+        }
       }
     });
-  }
-  
-  handleStartPayment() {
-    const reference = this.referenceInput.value.trim();
-    const amount = parseFloat(this.amountInput.value);
-    const confirmationNeeded = this.confirmationSelect.value === 'true';
-    
-    if (!reference || isNaN(amount) || amount <= 0) {
-      this.logEvent('ERROR', 'Please enter valid payment details');
-      return;
-    }
-    
-    this.logEvent('START', `Initiating payment: ${reference}, CHF ${amount}`);
-    
-    // Start payment using the component's public method
-    this.startPayment(reference, amount, confirmationNeeded);
   }
   
   attachComponentListeners() {
@@ -140,6 +144,9 @@ class TwintDemo {
     if (this.referenceInput) {
       this.referenceInput.value = reference;
     }
+    if (this.component) {
+      this.component.reference = reference;
+    }
     return reference;
   }
   
@@ -165,9 +172,9 @@ class TwintDemo {
   /**
    * Public method to start a new payment
    */
-  startPayment(reference, amount, confirmationNeeded = true) {
-    this.logEvent('API', `Starting payment via API: ${reference}`);
-    return this.component.startPayment(reference, amount, confirmationNeeded);
+  startPayment() {
+    this.logEvent('API', `Starting payment via API: ${this.component.reference}`);
+    return this.component.startPayment();
   }
   
   /**

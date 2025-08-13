@@ -1,4 +1,4 @@
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, nothing } from 'lit';
 
 /**
  * PayWithTwint Web Component
@@ -24,6 +24,8 @@ export class PayWithTwint extends LitElement {
   // Private fields
   #pollingTimer = null;
   #isPolling = false;
+  #encryptedOrderId = null;
+  #redirectingToMobile = false;
 
   static properties = {
     // Payment properties
@@ -34,6 +36,8 @@ export class PayWithTwint extends LitElement {
     merchantName: { type: String, attribute: 'merchant-name' },
     logoUrl: { type: String, attribute: 'logo-url' },
     theme: { type: String },
+    redirectUrl: { type: String, attribute: 'redirect-url' },
+    cancelOrderCallbackUrl: { type: String, attribute: 'cancel-order-callback-url' },
     
     // Text literals (customizable)
     textCancelCheckout: { type: String, attribute: 'text-cancel-checkout' },
@@ -524,6 +528,63 @@ export class PayWithTwint extends LitElement {
         gap: 20px;
       }
     }
+
+    /* Pay with TWINT Button Styles */
+    .pay-button-container {
+      display: inline-block;
+    }
+
+    .pay-with-twint-button {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #000;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .pay-with-twint-button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    }
+
+    .pay-with-twint-button:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    }
+
+    .pay-with-twint-button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .pay-with-twint-button svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .pay-with-twint-button.redirecting {
+      opacity: 0.8;
+      cursor: wait;
+    }
+
+    .button-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top: 2px solid white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
   `;
 
   constructor() {
@@ -537,6 +598,8 @@ export class PayWithTwint extends LitElement {
     this.merchantName = '';
     this.logoUrl = '';
     this.theme = 'light';
+    this.redirectUrl = '';
+    this.cancelOrderCallbackUrl = '';
     
     // Text literals with defaults
     this.textCancelCheckout = 'Cancel checkout';
@@ -574,7 +637,9 @@ export class PayWithTwint extends LitElement {
     
     // Only auto-start payment if start attribute is present along with reference and amount
     if (this.start && this.reference && this.amount) {
-      this.#autoStartPayment();
+      this.startPayment().catch(error => {
+        console.error('Auto-start payment failed:', error);
+      });
     }
   }
 
@@ -583,26 +648,51 @@ export class PayWithTwint extends LitElement {
     this.stopPolling();
   }
 
-  attributeChangedCallback(name, oldVal, newVal) {
-    super.attributeChangedCallback(name, oldVal, newVal);
-    
-    // Only auto-start if start attribute is present and reference/amount are set
-    if ((name === 'reference' || name === 'amount' || name === 'start') && 
-        this.start && this.reference && this.amount && !this.order) {
-      this.#autoStartPayment();
-    }
-  }
-
   render() {
-    // Don't render anything until payment is initiated (unless success or cancelled is set for testing)
+    // On mobile while redirecting, show button with spinner
+    if (this.#redirectingToMobile) {
+      return this.renderPayButton();
+    }
+
+    // Show Pay with TWINT button if not started yet
+    if (!this.start && !this.order && !this.loading && !this.success && !this.cancelled) {
+      return this.renderPayButton();
+    }
+
+    // Don't render anything if no order and not in a special state
     if (!this.order && !this.loading && !this.success && !this.cancelled) {
-      return '';
+      return nothing;
     }
 
     return html`
       <div class="container">
         ${this.renderHeader()}
         ${this.renderContent()}
+      </div>
+    `;
+  }
+
+  renderPayButton() {
+    const isDisabled = (!this.reference || !this.amount) || this.#redirectingToMobile;
+    const isRedirecting = this.#redirectingToMobile;
+    
+    return html`
+      <div class="pay-button-container">
+        <button 
+          class="pay-with-twint-button ${isRedirecting ? 'redirecting' : ''}" 
+          @click="${() => !isRedirecting && this.startPayment()}"
+          ?disabled="${isDisabled}"
+        >
+          ${isRedirecting ? html`
+            <span class="button-spinner"></span>
+            <span>Redirecting...</span>
+          ` : html`
+            <span>Pay with</span>
+            ${this.logoUrl ? html`
+              <img src="${this.logoUrl}" alt="TWINT" style="height: 24px; width: auto;" />
+            ` : ''}
+          `}
+        </button>
       </div>
     `;
   }
@@ -872,17 +962,15 @@ export class PayWithTwint extends LitElement {
   // Public API Methods
 
   /**
-   * Start a payment
-   * @param {string} reference - Payment reference
-   * @param {number} amount - Amount in CHF
-   * @param {boolean} confirmationNeeded - Whether manual confirmation is required
+   * Start a payment using the element's attributes
    */
-  async startPayment(reference, amount, confirmationNeeded = true) {
-    if (!reference || !amount) {
-      throw new Error('Reference and amount are required');
+  async startPayment() {
+    if (!this.reference || !this.amount) {
+      throw new Error('Reference and amount attributes are required');
     }
 
     this.loading = true;
+    this.start = true;
     this.status = 'loading';
 
     try {
@@ -890,7 +978,11 @@ export class PayWithTwint extends LitElement {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference, amount, confirmationNeeded })
+        body: JSON.stringify({ 
+          reference: this.reference, 
+          amount: this.amount, 
+          confirmationNeeded: this.confirmationNeeded 
+        })
       });
 
       const data = await response.json();
@@ -902,14 +994,27 @@ export class PayWithTwint extends LitElement {
       this.order = data.data;
       this.status = 'active';
       
+      // Store encrypted order ID privately if provided in response
+      if (data.data.encryptedOrderId) {
+        this.#encryptedOrderId = data.data.encryptedOrderId;
+      }
+      
       this.dispatchEvent(new CustomEvent('payment-started', { 
         detail: this.order,
         bubbles: true,
         composed: true
       }));
 
-      // Start polling automatically
-      this.startPolling();
+      // Check if mobile device and redirect to TWINT app
+      if (this.#isMobileDevice()) {
+        // Set flag to prevent desktop UI from rendering
+        this.#redirectingToMobile = true;
+        // Redirect immediately
+        this.#redirectToTwintApp();
+      } else {
+        // Start polling automatically for desktop
+        this.startPolling();
+      }
       
       return this.order;
     } catch (error) {
@@ -1073,15 +1178,29 @@ export class PayWithTwint extends LitElement {
 
   // Private helper methods
 
-  async #autoStartPayment() {
-    // Small delay to ensure component is fully initialized
-    await new Promise(resolve => setTimeout(resolve, 100));
+  #isMobileDevice() {
+    return /Android|iPhone|iPad/i.test(navigator.userAgent);
+  }
+
+  #redirectToTwintApp() {
+    if (!this.order?.id) return;
     
-    try {
-      await this.startPayment(this.reference, this.amount, this.confirmationNeeded);
-    } catch (error) {
-      console.error('Auto-start payment failed:', error);
+    // Only append orderID to URLs if encrypted order ID is available
+    let redirectUrl = this.redirectUrl || '';
+    let cancelUrl = this.cancelOrderCallbackUrl || '';
+    
+    if (this.#encryptedOrderId) {
+      redirectUrl = redirectUrl ? `${redirectUrl}${redirectUrl.includes('?') ? '&' : '?'}orderID=${this.#encryptedOrderId}` : '';
+      cancelUrl = cancelUrl ? `${cancelUrl}${cancelUrl.includes('?') ? '&' : '?'}orderID=${this.#encryptedOrderId}` : '';
     }
+    
+    const twintUrl = new URL('https://pay.twint.ch/static-page/');
+    twintUrl.searchParams.set('orderUUID', this.order.id);
+    twintUrl.searchParams.set('cancelOrderCallbackURL', cancelUrl);
+    twintUrl.searchParams.set('redirectURL', redirectUrl);
+    twintUrl.searchParams.set('type', 'PAYMENT');
+    
+    window.location.href = twintUrl.toString();
   }
 
   #handleStatusUpdate(order) {

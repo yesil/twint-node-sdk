@@ -126,6 +126,14 @@ export class OrderStatus {
   }
 
   /**
+   * Check if order is pending (either in progress or pending confirmation)
+   * @returns {boolean}
+   */
+  isPending() {
+    return this.isInProgress() || this.isPendingConfirmation();
+  }
+
+  /**
    * Check if order requires user interaction
    * @returns {boolean}
    */

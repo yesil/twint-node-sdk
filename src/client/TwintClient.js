@@ -2,6 +2,7 @@ import { TwintSoapClient } from '../soap/SoapClient.js';
 import { OrderStatus } from '../values/OrderStatus.js';
 import { OrderId, StoreUuid } from '../values/Uuid.js';
 import { FiledMerchantTransactionReference } from '../values/MerchantTransactionReference.js';
+import { CryptoUtil } from '../utils/crypto.js';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -13,6 +14,7 @@ export class TwintClient {
   #cashRegisterId;
   #enrollmentDetails;
   #initialized;
+  #crypto;
 
   /**
    * @param {Object} config
@@ -21,6 +23,7 @@ export class TwintClient {
    * @param {import('../values/Environment.js').Environment} config.environment
    * @param {string} config.cashRegisterId Required cash register ID
    * @param {string} [config.version='v8.6']
+   * @param {string} [config.orderSecret] Secret key for encrypting order IDs
    */
   constructor(config) {
     const { 
@@ -28,7 +31,8 @@ export class TwintClient {
       storeUuid, 
       environment, 
       cashRegisterId,
-      version = 'v8.6'
+      version = 'v8.6',
+      orderSecret
     } = config;
 
     if (!cashRegisterId) {
@@ -40,6 +44,9 @@ export class TwintClient {
     this.#cashRegisterId = cashRegisterId;
     this.#enrollmentDetails = null;
     this.#initialized = true; // No need for async initialization anymore
+    
+    // Initialize crypto with provided secret or default
+    this.#crypto = orderSecret ? new CryptoUtil(orderSecret) : CryptoUtil.createDefault();
   }
 
 
@@ -559,6 +566,37 @@ export class TwintClient {
       };
     } catch (error) {
       throw new Error(`Failed to cancel fast checkout: ${error.message}`);
+    }
+  }
+
+  /**
+   * Encrypt an order ID for secure URL transmission
+   * @param {string} orderId - The order ID to encrypt
+   * @returns {string} Encrypted order ID (URL-safe base64)
+   */
+  encryptOrderId(orderId) {
+    return this.#crypto.encrypt(orderId);
+  }
+
+  /**
+   * Decrypt an encrypted order ID
+   * @param {string} encryptedOrderId - The encrypted order ID
+   * @returns {string} The original order ID
+   */
+  decryptOrderId(encryptedOrderId) {
+    return this.#crypto.decrypt(encryptedOrderId);
+  }
+
+  /**
+   * Get the order ID from an encrypted value
+   * @param {string} encryptedValue - The encrypted order ID value
+   * @returns {string} The decrypted order ID
+   */
+  getOrderIdFromEncrypted(encryptedValue) {
+    try {
+      return this.decryptOrderId(encryptedValue);
+    } catch (error) {
+      throw new Error(`Invalid encrypted order ID: ${error.message}`);
     }
   }
 }

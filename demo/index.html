@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TWINT Payment Demo</title>
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       padding: 20px;
@@ -13,18 +17,51 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
 
+    @media (max-width: 768px) {
+      body {
+        padding: 0;
+        background: #f5f5f5;
+      }
+    }
+
     pay-with-twint {
-      margin: 20px;
+      margin: 20px auto;
+      display: block;
+      max-width: 100%;
+    }
+
+    @media (max-width: 768px) {
+      pay-with-twint {
+        margin: 15px auto;
+        width: 100%;
+      }
     }
 
     .demo-container {
       margin: 0 auto;
+      max-width: 1200px;
+    }
+
+    @media (max-width: 768px) {
+      .demo-container {
+        max-width: 100%;
+        margin: 0;
+      }
     }
 
     .demo-header {
       text-align: center;
       color: white;
       margin-bottom: 40px;
+      padding: 0 20px;
+    }
+
+    @media (max-width: 768px) {
+      .demo-header {
+        margin-bottom: 0;
+        padding: 30px 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
     }
 
     .demo-header h1 {
@@ -71,7 +108,7 @@
       background: white;
       border-radius: 12px;
       padding: 30px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
       margin-bottom: 30px;
     }
 
@@ -80,34 +117,35 @@
       flex-direction: column;
       gap: 20px;
       padding: 20px 0;
-      margin-bottom: 40px;
+      margin-bottom: 20px;
     }
 
     .example-markup {
       background: #f8f9fa;
       border-radius: 8px;
-      padding: 20px;
+      padding: 15px;
       overflow-x: auto;
-      max-width: 800px;
-      margin: 0 auto;
       width: 100%;
     }
 
     .example-markup h3 {
       margin-top: 0;
+      margin-bottom: 15px;
       color: #333;
-      font-size: 14px;
+      font-size: 13px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      font-weight: 600;
     }
 
     .example-markup pre {
       margin: 0;
       font-size: 12px;
       color: #444;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-wrap: break-word;
+      line-height: 1.4;
+      white-space: pre;
+      overflow-x: auto;
+      max-width: 100%;
     }
 
     .example-result {
@@ -115,12 +153,10 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 400px;
+      min-height: 300px;
       background: #fafafa;
       border-radius: 8px;
       padding: 20px;
-      max-width: 800px;
-      margin: 0 auto;
       width: 100%;
     }
 
@@ -151,8 +187,19 @@
     .panel {
       background: white;
       border-radius: 12px;
-      padding: 30px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      padding: 25px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+      margin-bottom: 30px;
+    }
+
+    @media (max-width: 768px) {
+      .panel {
+        border-radius: 0;
+        margin: 0 0 2px 0;
+        padding: 20px;
+        box-shadow: none;
+        max-width: 100% !important;
+      }
     }
 
     .panel h2 {
@@ -180,6 +227,14 @@
       border: 2px solid #e0e0e0;
       border-radius: 6px;
       font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    @media (max-width: 768px) {
+      .form-group input,
+      .form-group select {
+        font-size: 16px; /* Prevents zoom on iOS */
+      }
     }
 
     .form-group input:focus,
@@ -236,7 +291,8 @@
       background: white;
       border-radius: 12px;
       padding: 20px;
-      margin-top: 30px;
+      margin: 30px auto;
+      max-width: 900px;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     }
 
@@ -344,8 +400,40 @@
     }
 
     @media (max-width: 768px) {
+      .example-markup h3,
+      .example-result h3 {
+        font-size: 12px;
+      }
+      
+      .demo-header h1 {
+        font-size: 1.8rem;
+      }
+      
       .main-content {
         grid-template-columns: 1fr;
+      }
+
+      .event-log {
+        border-radius: 0;
+        margin: 2px 0 0 0;
+        box-shadow: none;
+        max-width: 100% !important;
+      }
+
+      #message-container {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+        max-width: none;
+      }
+
+      .example-markup,
+      .example-result {
+        border-radius: 0;
+      }
+
+      .example-markup pre {
+        font-size: 11px;
       }
     }
   </style>
@@ -357,19 +445,19 @@
     </div>
 
     <!-- API Test Panel -->
-    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+    <div class="panel" style="max-width: 900px; margin: 0 auto 30px;">
         <h2>Test with Real API</h2>
         
         <!-- Payment form -->
         <div id="payment-form">
           <div class="form-group">
             <label for="reference">Order Reference</label>
-            <input type="text" id="reference" placeholder="e.g., ORDER-123" />
+            <input type="text" id="reference" placeholder="e.g., ORDER-123" value="ORDER-123" />
           </div>
           
           <div class="form-group">
             <label for="amount">Amount (CHF)</label>
-            <input type="number" id="amount" min="0.01" step="0.01" placeholder="0.00" />
+            <input type="number" id="amount" min="0.01" step="0.01" placeholder="0.00" value="1" />
           </div>
           
           <div class="form-group">
@@ -379,21 +467,59 @@
               <option value="false">Auto-Confirm Payment</option>
             </select>
           </div>
-          
-          <button id="start-payment" class="btn-primary">Start Payment</button>
         </div>
         
-        <!-- Pay with TWINT component for real testing -->
+          <!-- Pay with TWINT component for real testing -->
         <pay-with-twint 
           id="payment-component"
+          reference="ORDER-123"
+          amount="1"
+          confirmation-needed="true"
           api-url="/twint"
           merchant-name="Test Merchant"
           logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg">
         </pay-with-twint>
+  </div>
+
+    <!-- Mobile Redirect Example -->
+    <div class="panel" style="max-width: 900px; margin: 0 auto 30px;">
+      <h2>Mobile Redirect Example</h2>
+      <div class="example-section">
+        <div class="example-markup">
+          <h3>Markup</h3>
+          <pre>&lt;pay-with-twint 
+  id="mobile-payment"
+  reference="MOBILE-ORDER-001"
+  amount="75.50"
+  api-url="/twint"
+  merchant-name="Mobile Shop"
+  logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg"
+  redirect-url="https://myshop.ch/success"
+  cancel-order-callback-url="https://myshop.ch/cancel"&gt;
+&lt;/pay-with-twint&gt;
+
+</pre>
+        </div>
+        <div class="example-result">
+          <h3>Result - Click to Test</h3>
+          <div style="padding: 20px; background: #f0f0f0; border-radius: 8px; text-align: center;">
+            <pay-with-twint 
+              id="example-mobile"
+              reference="MOBILE-ORDER-001"
+              amount="75.50"
+              api-url="/twint"
+              merchant-name="Mobile Shop"
+              logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg"
+              redirect-url="https://myshop.ch/success"
+              cancel-order-callback-url="https://myshop.ch/cancel">
+            </pay-with-twint>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Success Example -->
-    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+    <div class="panel" style="max-width: 900px; margin: 0 auto 30px;">
       <h2>Success State Example</h2>
       <div class="example-section">
         <div class="example-markup">
@@ -413,7 +539,7 @@
             success
             api-url="/twint"
             reference="ORDER-2024-001"
-            amount="99.95"
+            amount="1"
             merchant-name="Demo Store"
             logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg">
           </pay-with-twint>
@@ -422,7 +548,7 @@
     </div>
 
     <!-- Cancelled Example -->
-    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+    <div class="panel" style="max-width: 900px; margin: 0 auto 30px;">
       <h2>Cancelled State Example</h2>
       <div class="example-section">
         <div class="example-markup">
@@ -454,7 +580,7 @@
     </div>
 
     <!-- German Localization Example -->
-    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+    <div class="panel" style="max-width: 900px; margin: 0 auto 30px;">
       <h2>German Localization Example</h2>
       <div class="example-section">
         <div class="example-markup">
@@ -526,7 +652,7 @@
     </div>
 
     <!-- Dark Theme Example -->
-    <div class="panel" style="max-width: 900px; margin: 30px auto;">
+    <div class="panel" style="max-width: 900px; margin: 0 auto 30px;">
       <h2>Dark Theme Example</h2>
       <div class="example-section">
         <div class="example-markup">
@@ -542,22 +668,7 @@
     merchant-name="Night Shop"
     logo-url="https://www.twint.ch/content/themes/twint/images/twint-logo.svg"&gt;
   &lt;/pay-with-twint&gt;
-  
-  &lt;script&gt;
-    // Dark theme with event handling
-    const darkPayment = document.getElementById('dark-payment');
-    
-    darkPayment.addEventListener('payment-started', (e) => {
-      console.log('Dark theme payment started', e.detail);
-    });
-    
-    // Custom dark theme notification
-    darkPayment.addEventListener('payment-completed', (e) => {
-      setTimeout(() => {
-        document.body.style.background = '';
-      }, 500);
-    });
-  &lt;/script&gt;
+
 &lt;/div&gt;</pre>
         </div>
         <div class="example-result">

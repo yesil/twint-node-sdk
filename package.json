@@ -49,14 +49,14 @@
     "express": "^4.18.2",
     "lit": "^3.1.0",
     "qrcode": "^1.5.3",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "xml-formatter": "^3.6.6"
   },
   "devDependencies": {
     "@web/dev-server": "^0.4.6",
     "@web/dev-server-esbuild": "^1.0.2",
     "eslint": "^8.54.0",
     "koa-proxies": "^0.12.4",
-    "prettier": "^3.1.0",
-    "xml-formatter": "^3.6.6"
+    "prettier": "^3.1.0"
   }
 }
