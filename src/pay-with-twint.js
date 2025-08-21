@@ -1454,7 +1454,9 @@ export class PayWithTwint extends LitElement {
   // Private helper methods
 
   #isMobileDevice() {
-    return /Android|iPhone|iPad/i.test(navigator.userAgent);
+    // Only show mobile experience for iOS devices
+    // Android devices will keep desktop experience but be responsive
+    return /iPhone|iPad/i.test(navigator.userAgent);
   }
 
   #generateDeepLink(scheme, token) {

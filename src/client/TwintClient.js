@@ -1,10 +1,14 @@
 import { EventEmitter } from 'events';
+import path from 'path';
 import { TwintSoapClient } from '../soap/SoapClient.js';
 import { OrderStatus } from '../values/OrderStatus.js';
 import { OrderId, StoreUuid } from '../values/Uuid.js';
-import { FiledMerchantTransactionReference } from '../values/MerchantTransactionReference.js';
+import { FiledMerchantTransactionReference, UnfiledMerchantTransactionReference } from '../values/MerchantTransactionReference.js';
 import { CryptoUtil } from '../utils/crypto.js';
 import { v4 as uuidv4 } from 'uuid';
+import { CertificateContainer } from '../certificates/Certificate.js';
+import { Environment } from '../values/Environment.js';
+import { Money } from '../values/Money.js';
 
 /**
  * Main TWINT SDK client with event-driven architecture
@@ -19,6 +23,8 @@ export class TwintClient extends EventEmitter {
   #activeMonitors;
   #maxConcurrentMonitors;
   #monitoringInterval;
+  #orderStore;
+  #logger;
 
   /**
    * @param {Object} config
@@ -26,11 +32,12 @@ export class TwintClient extends EventEmitter {
    * @param {string|import('../values/Uuid.js').StoreUuid} config.storeUuid
    * @param {import('../values/Environment.js').Environment} config.environment
    * @param {string} config.cashRegisterId Required cash register ID
-   * @param {Object} config.handlers Required event handlers
-   * @param {Function} config.handlers.success Handler for successful payments
-   * @param {Function} config.handlers.cancel Handler for cancelled payments
-   * @param {Function} config.handlers.error Handler for errors
+   * @param {Object} [config.handlers] Optional event handlers
+   * @param {Function} [config.handlers.success] Handler for successful payments
+   * @param {Function} [config.handlers.cancel] Handler for cancelled payments
+   * @param {Function} [config.handlers.error] Handler for errors
    * @param {Function} [config.handlers.statusChange] Optional handler for status changes
+   * @param {Object} [config.logger] Optional logger instance
    * @param {string} [config.version='v8.6']
    * @param {string} [config.orderSecret] Secret key for encrypting order IDs
    * @param {number} [config.maxConcurrentMonitors=100] Maximum concurrent order monitors
@@ -43,7 +50,8 @@ export class TwintClient extends EventEmitter {
       storeUuid, 
       environment, 
       cashRegisterId,
-      handlers,
+      handlers = {},
+      logger = console,
       version = 'v8.6',
       orderSecret,
       maxConcurrentMonitors = 100,
@@ -54,33 +62,30 @@ export class TwintClient extends EventEmitter {
       throw new Error('cashRegisterId is required');
     }
 
-    // Validate mandatory handlers
-    if (!handlers || typeof handlers !== 'object') {
-      throw new Error('handlers object is required');
+    // Register event handlers if provided
+    if (handlers.success && typeof handlers.success === 'function') {
+      this.on('success', handlers.success);
     }
-    if (!handlers.success || typeof handlers.success !== 'function') {
-      throw new Error('handlers.success function is mandatory');
+    if (handlers.cancel && typeof handlers.cancel === 'function') {
+      this.on('cancel', handlers.cancel);
     }
-    if (!handlers.cancel || typeof handlers.cancel !== 'function') {
-      throw new Error('handlers.cancel function is mandatory');
+    if (handlers.error && typeof handlers.error === 'function') {
+      this.on('error', handlers.error);
     }
-    if (!handlers.error || typeof handlers.error !== 'function') {
-      throw new Error('handlers.error function is mandatory');
-    }
-
-    // Register event handlers
-    this.on('success', handlers.success);
-    this.on('cancel', handlers.cancel);
-    this.on('error', handlers.error);
     if (handlers.statusChange && typeof handlers.statusChange === 'function') {
       this.on('statusChange', handlers.statusChange);
     }
+
+    // Set up internal handlers for order store management
+    this.on('success', (order) => this.#updateOrderStore(order, 'SUCCESS'));
+    this.on('cancel', (order) => this.#updateOrderStore(order, 'CANCELLED'));
+    this.on('statusChange', (order) => this.#updateOrderStore(order));
 
     this.#soapClient = new TwintSoapClient(certificate, environment, version);
     this.#storeUuid = typeof storeUuid === 'string' ? StoreUuid.fromString(storeUuid) : storeUuid;
     this.#cashRegisterId = cashRegisterId;
     this.#enrollmentDetails = null;
-    this.#initialized = true; // No need for async initialization anymore
+    this.#initialized = true;
     
     // Initialize crypto with provided secret or default
     this.#crypto = orderSecret ? new CryptoUtil(orderSecret) : CryptoUtil.createDefault();
@@ -90,19 +95,175 @@ export class TwintClient extends EventEmitter {
     this.#maxConcurrentMonitors = maxConcurrentMonitors;
     this.#monitoringInterval = monitoringInterval;
     
+    // Initialize order store and logger
+    this.#orderStore = new Map();
+    this.#logger = logger;
+    
     // Bind middleware method to preserve context
     this.middleware = this.middleware.bind(this);
   }
 
   /**
+   * Create a TwintClient instance from environment variables
+   * @param {Object} options Optional configuration
+   * @param {Object} [options.logger] Logger instance
+   * @returns {Promise<TwintClient>}
+   */
+  static async fromEnvironment(options = {}) {
+    const { logger = console } = options;
+    
+    // Check for required environment variables
+    if (!process.env.TWINT_CERTIFICATE_PATH || !process.env.TWINT_STORE_UUID) {
+      throw new Error(
+        'Missing required environment variables: TWINT_CERTIFICATE_PATH and TWINT_STORE_UUID'
+      );
+    }
+
+    // Load certificate
+    const certificatePath = path.resolve(process.env.TWINT_CERTIFICATE_PATH);
+    logger.info?.(`Loading certificate from: ${certificatePath}`) || console.log(`Loading certificate from: ${certificatePath}`);
+
+    const certificate = await CertificateContainer.fromFile(
+      certificatePath,
+      process.env.TWINT_CERTIFICATE_PASSWORD || null
+    );
+
+    // Determine environment
+    let environment;
+    switch (process.env.TWINT_ENVIRONMENT) {
+    case 'PRODUCTION':
+      environment = Environment.PRODUCTION;
+      break;
+    case 'INTEGRATION':
+      environment = Environment.INTEGRATION;
+      break;
+    case 'STAGING':
+      environment = Environment.STAGING;
+      break;
+    default:
+      environment = Environment.INTEGRATION; // Default to integration for dev
+    }
+
+    // Check for required cash register ID
+    if (!process.env.TWINT_CASH_REGISTER_ID) {
+      throw new Error('TWINT_CASH_REGISTER_ID is required in environment variables');
+    }
+
+    const cashRegisterId = process.env.TWINT_CASH_REGISTER_ID;
+
+    // Create default handlers that update order store
+    const handlers = {
+      success: (order) => {
+        logger.info?.('✅ Payment successful', { 
+          orderId: order.id.toString(),
+          amount: order.amount,
+          reference: order.merchantTransactionReference?.toString()
+        }) || console.log('✅ Payment successful', order.id.toString());
+      },
+      cancel: (order) => {
+        logger.warn?.('❌ Payment cancelled', {
+          orderId: order.id.toString(),
+          status: order.status.toString(),
+          reason: order.transactionStatus
+        }) || console.log('❌ Payment cancelled', order.id.toString());
+      },
+      error: (error, order) => {
+        logger.error?.('⚠️ Payment error', {
+          orderId: order?.id?.toString(),
+          error: error.message
+        }) || console.error('⚠️ Payment error', error.message);
+      },
+      statusChange: (order) => {
+        logger.debug?.('📊 Order status update', {
+          orderId: order.id.toString(),
+          status: order.status.toString(),
+          transactionStatus: order.transactionStatus
+        }) || console.log('📊 Order status update', order.id.toString());
+      }
+    };
+
+    // Initialize client
+    const client = new TwintClient({
+      certificate,
+      storeUuid: process.env.TWINT_STORE_UUID,
+      environment,
+      cashRegisterId,
+      handlers,
+      logger,
+      monitoringInterval: 2000
+    });
+
+    logger.info?.('TWINT client initialized', {
+      environment: environment.name,
+      storeUuid: process.env.TWINT_STORE_UUID,
+      cashRegisterId: cashRegisterId,
+    }) || console.log('TWINT client initialized');
+
+    // Enroll the cash register at startup
+    try {
+      logger.info?.('Enrolling cash register with TWINT...', { cashRegisterId }) || console.log('Enrolling cash register...');
+      const enrollmentResult = await client.enrollCashRegister('EPOS', cashRegisterId);
+      logger.info?.('Cash register enrolled successfully', {
+        cashRegisterId: enrollmentResult.cashRegisterId,
+        beaconUuid: enrollmentResult.beaconUuid,
+        majorId: enrollmentResult.majorId,
+        minorId: enrollmentResult.minorId,
+      }) || console.log('Cash register enrolled successfully');
+    } catch (enrollError) {
+      logger.warn?.('Cash register enrollment failed (may already be enrolled)', {
+        cashRegisterId: cashRegisterId,
+        error: enrollError.message,
+      }) || console.warn('Cash register enrollment failed (may already be enrolled)');
+    }
+
+    return client;
+  }
+
+  /**
    * Express middleware method
-   * Usage: app.use(twintClient.middleware)
+   * Usage: app.use('/twint', twintClient.middleware)
+   * Handles all TWINT routes internally
    * @param {Object} req Express request object
    * @param {Object} res Express response object
    * @param {Function} next Express next function
    */
   middleware(req, res, next) {
+    // Attach client to request for direct access if needed
     req.twint = this;
+    
+    // Extract the path without query parameters
+    const path = req.path;
+    
+    // Route handling
+    if (req.method === 'POST' && path === '/orders/start') {
+      return this.#handleStartOrder(req, res);
+    }
+    
+    if (req.method === 'GET' && path.match(/^\/orders\/([^\/]+)$/)) {
+      const match = path.match(/^\/orders\/([^\/]+)$/);
+      return this.#handleGetOrder(req, res, match[1]);
+    }
+    
+    if (req.method === 'POST' && path.match(/^\/orders\/([^\/]+)\/stop-monitoring$/)) {
+      const match = path.match(/^\/orders\/([^\/]+)\/stop-monitoring$/);
+      return this.#handleStopMonitoring(req, res, match[1]);
+    }
+    
+    if (req.method === 'POST' && path.match(/^\/orders\/([^\/]+)\/confirm$/)) {
+      const match = path.match(/^\/orders\/([^\/]+)\/confirm$/);
+      return this.#handleConfirmOrder(req, res, match[1]);
+    }
+    
+    if (req.method === 'POST' && path.match(/^\/orders\/([^\/]+)\/cancel$/)) {
+      const match = path.match(/^\/orders\/([^\/]+)\/cancel$/);
+      return this.#handleCancelOrder(req, res, match[1]);
+    }
+    
+    if (req.method === 'GET' && path === '/health') {
+      return this.#handleHealth(req, res);
+    }
+    
+    // Not a TWINT route, pass to next middleware
     next();
   }
 
@@ -754,5 +915,318 @@ export class TwintClient extends EventEmitter {
     } catch (error) {
       throw new Error(`Invalid encrypted order ID: ${error.message}`);
     }
+  }
+
+  /**
+   * Update the order store with order data
+   * @private
+   * @param {Object} order Order object
+   * @param {string} [status] Optional status override
+   */
+  #updateOrderStore(order, status) {
+    if (!order?.id) return;
+    
+    const orderId = order.id.toString();
+    const storedOrder = this.#orderStore.get(orderId) || {};
+    
+    const updatedOrder = {
+      ...storedOrder,
+      id: orderId,
+      status: status || order.status?.toString() || storedOrder.status,
+      transactionStatus: order.transactionStatus,
+      lastUpdated: new Date().toISOString()
+    };
+    
+    if (status === 'SUCCESS') {
+      updatedOrder.completedAt = new Date().toISOString();
+    } else if (status === 'CANCELLED') {
+      updatedOrder.cancelledAt = new Date().toISOString();
+    }
+    
+    this.#orderStore.set(orderId, updatedOrder);
+  }
+
+  /**
+   * Handle start order route
+   * @private
+   */
+  async #handleStartOrder(req, res) {
+    try {
+      const { reference, amount, confirmationNeeded = true } = req.body;
+
+      if (!reference || !amount || amount <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid request: reference and positive amount are required',
+        });
+      }
+
+      this.#logger.info?.('Starting order', { reference, amount, confirmationNeeded }) || 
+        console.log('Starting order', { reference, amount, confirmationNeeded });
+
+      // Start real TWINT order - monitoring begins automatically
+      const order = await this.startOrder({
+        reference: reference || UnfiledMerchantTransactionReference.generate(),
+        amount: Money.CHF(amount),
+        confirmationNeeded,
+        autoMonitor: true // Enable automatic monitoring
+      });
+
+      // Use the QR code directly from TWINT response
+      if (!order.qrCode) {
+        this.#logger.error?.('No QR code received from TWINT API') || 
+          console.error('No QR code received from TWINT API');
+        return res.status(500).json({
+          success: false,
+          error: 'TWINT API did not return a QR code',
+        });
+      }
+      
+      if (!order.pairingToken) {
+        this.#logger.error?.('No pairing token received from TWINT API') || 
+          console.error('No pairing token received from TWINT API');
+        return res.status(500).json({
+          success: false,
+          error: 'TWINT API did not return a pairing token',
+        });
+      }
+
+      const orderData = {
+        id: order.id.toString(),
+        reference,
+        amount: {
+          value: amount,
+          currency: 'CHF',
+        },
+        status: order.status.toString(),
+        pairingToken: order.pairingToken,
+        qrCode: order.qrCode,
+        confirmationNeeded,
+        createdAt: new Date().toISOString(),
+      };
+
+      this.#orderStore.set(orderData.id, orderData);
+
+      this.#logger.info?.('Order started with automatic monitoring', {
+        orderId: orderData.id,
+        reference: orderData.reference,
+        amount: orderData.amount.value,
+        monitoring: 'active'
+      }) || console.log('Order started with automatic monitoring');
+
+      res.json({
+        success: true,
+        data: orderData,
+        message: 'Order started and monitoring automatically'
+      });
+    } catch (error) {
+      this.#logger.error?.('Failed to start order:', error.message) || 
+        console.error('Failed to start order:', error.message);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Handle get order route
+   * @private
+   */
+  async #handleGetOrder(req, res, orderId) {
+    try {
+      // Check if order exists in store (updated by event handlers)
+      const storedOrder = this.#orderStore.get(orderId);
+      
+      if (!storedOrder) {
+        // If not in store, try to fetch it
+        this.#logger.info?.('Fetching order status', { orderId }) || 
+          console.log('Fetching order status', { orderId });
+        const order = await this.monitorOrder(orderId);
+        
+        const orderData = {
+          id: orderId,
+          amount: {
+            value: order.amount?.amount || 0,
+            currency: order.amount?.currency || 'CHF',
+          },
+          status: order.status.toString(),
+          transactionStatus: order.transactionStatus?.toString(),
+          updatedAt: new Date().toISOString(),
+        };
+        
+        this.#orderStore.set(orderId, orderData);
+        
+        res.json({
+          success: true,
+          data: orderData,
+          monitoring: false
+        });
+      } else {
+        // Return stored order (being updated by event handlers)
+        res.json({
+          success: true,
+          data: storedOrder,
+          monitoring: this.#activeMonitors.has(orderId)
+        });
+      }
+    } catch (error) {
+      this.#logger.error?.('Failed to monitor order:', error.message) || 
+        console.error('Failed to monitor order:', error.message);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Handle stop monitoring route
+   * @private
+   */
+  async #handleStopMonitoring(req, res, orderId) {
+    try {
+      const stopped = this.stopMonitoring(orderId);
+
+      this.#logger.info?.('Stopped monitoring order', { orderId, stopped }) || 
+        console.log('Stopped monitoring order', { orderId, stopped });
+
+      res.json({
+        success: true,
+        stopped,
+        message: stopped ? 'Monitoring stopped' : 'Order was not being monitored'
+      });
+    } catch (error) {
+      this.#logger.error?.('Failed to stop monitoring:', error.message) || 
+        console.error('Failed to stop monitoring:', error.message);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Handle confirm order route
+   * @private
+   */
+  async #handleConfirmOrder(req, res, orderId) {
+    try {
+      const { amount } = req.body;
+
+      if (!amount || amount <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid amount',
+        });
+      }
+
+      this.#logger.info?.('Confirming order', { orderId, amount }) || 
+        console.log('Confirming order', { orderId, amount });
+
+      // Confirm real TWINT order
+      const order = await this.confirmOrder(orderId, Money.CHF(amount));
+
+      const storedOrder = this.#orderStore.get(orderId) || {};
+      const orderData = {
+        ...storedOrder,
+        id: orderId,
+        status: order.status.toString(),
+        transactionStatus: order.transactionStatus?.toString(),
+        confirmedAt: new Date().toISOString(),
+      };
+
+      this.#orderStore.set(orderId, orderData);
+
+      this.#logger.info?.('Order confirmed', {
+        orderId,
+        status: orderData.status,
+      }) || console.log('Order confirmed', { orderId });
+
+      res.json({
+        success: true,
+        data: orderData,
+      });
+    } catch (error) {
+      this.#logger.error?.('Failed to confirm order:', error.message) || 
+        console.error('Failed to confirm order:', error.message);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Handle cancel order route
+   * @private
+   */
+  async #handleCancelOrder(req, res, orderId) {
+    try {
+      this.#logger.info?.('Cancelling order', { orderId }) || 
+        console.log('Cancelling order', { orderId });
+
+      // Cancel real TWINT order
+      const order = await this.cancelOrder(orderId);
+
+      const storedOrder = this.#orderStore.get(orderId) || {};
+      const orderData = {
+        ...storedOrder,
+        id: orderId,
+        status: order.status.toString(),
+        cancelledAt: new Date().toISOString(),
+      };
+
+      this.#orderStore.set(orderId, orderData);
+
+      this.#logger.info?.('Order cancelled', {
+        orderId,
+        status: orderData.status,
+      }) || console.log('Order cancelled', { orderId });
+
+      res.json({
+        success: true,
+        data: orderData,
+      });
+    } catch (error) {
+      this.#logger.error?.('Failed to cancel order:', error.message) || 
+        console.error('Failed to cancel order:', error.message);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Handle health check route
+   * @private
+   */
+  async #handleHealth(req, res) {
+    const health = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      twintClient: true,
+      cashRegister: {
+        enrolled: this.#cashRegisterId !== null,
+        id: this.#cashRegisterId ? this.#cashRegisterId.substring(0, 8) + '...' : null,
+      },
+      monitoring: {
+        active: this.getActiveMonitorsCount(),
+        enabled: true
+      }
+    };
+
+    try {
+      const systemStatus = await this.checkSystemStatus();
+      health.twintSystem = systemStatus;
+    } catch (error) {
+      health.twintSystem = {
+        available: false,
+        error: error.message,
+      };
+    }
+
+    res.json(health);
   }
 }
