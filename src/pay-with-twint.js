@@ -1,4 +1,5 @@
 import { LitElement, html, css, nothing } from 'lit';
+import { twintApps } from './twint-apps.js';
 
 /**
  * PayWithTwint Web Component
@@ -25,7 +26,8 @@ export class PayWithTwint extends LitElement {
   #pollingTimer = null;
   #isPolling = false;
   #encryptedOrderId = null;
-  #redirectingToMobile = false;
+  #showingAppSelector = false;
+  #twintApps = twintApps;
 
   static properties = {
     // Payment properties
@@ -34,7 +36,6 @@ export class PayWithTwint extends LitElement {
     apiUrl: { type: String, attribute: 'api-url' },
     confirmationNeeded: { type: Boolean, attribute: 'confirmation-needed' },
     merchantName: { type: String, attribute: 'merchant-name' },
-    logoUrl: { type: String, attribute: 'logo-url' },
     theme: { type: String },
     redirectUrl: { type: String, attribute: 'redirect-url' },
     cancelOrderCallbackUrl: { type: String, attribute: 'cancel-order-callback-url' },
@@ -58,6 +59,9 @@ export class PayWithTwint extends LitElement {
     textMerchantLabel: { type: String, attribute: 'text-merchant-label' },
     textTotalAmountLabel: { type: String, attribute: 'text-total-amount-label' },
     textAmountLabel: { type: String, attribute: 'text-amount-label' },
+    textChooseApp: { type: String, attribute: 'text-choose-app' },
+    textOtherBanks: { type: String, attribute: 'text-other-banks' },
+    textEnterCode: { type: String, attribute: 'text-enter-code' },
     
     // Control attributes
     start: { type: Boolean },
@@ -78,7 +82,12 @@ export class PayWithTwint extends LitElement {
       line-height: 1.5;
       color: #333;
       box-sizing: border-box;
-      width: 800px;
+    }
+
+    /* Hide slotted content */
+    ::slotted([slot="bank-images"]),
+    ::slotted([slot="logo"]) {
+      display: none;
     }
 
     :host([theme='dark']) {
@@ -532,6 +541,30 @@ export class PayWithTwint extends LitElement {
     /* Pay with TWINT Button Styles */
     .pay-button-container {
       display: inline-block;
+      position: relative;
+      overflow: hidden;
+      border-radius: 8px;
+    }
+
+    .pay-button-container::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, 
+        transparent, 
+        rgba(255, 255, 255, 0.2), 
+        transparent
+      );
+      transition: left 0.5s ease-in-out;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .pay-button-container:hover::before {
+      left: 100%;
     }
 
     .pay-with-twint-button {
@@ -549,11 +582,7 @@ export class PayWithTwint extends LitElement {
       font-family: inherit;
       transition: transform 0.1s, box-shadow 0.2s;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    }
-
-    .pay-with-twint-button:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+      position: relative;
     }
 
     .pay-with-twint-button:active {
@@ -572,18 +601,166 @@ export class PayWithTwint extends LitElement {
       height: 24px;
     }
 
-    .pay-with-twint-button.redirecting {
-      opacity: 0.8;
-      cursor: wait;
+    /* Mobile App Selector Styles */
+    .mobile-app-selector {
+      background: white;
+      padding: 24px;
+      min-height: 400px;
     }
 
-    .button-spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      border-top: 2px solid white;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
+    :host([theme='dark']) .mobile-app-selector {
+      background: #1a1a1a;
+    }
+
+    .app-selector-title {
+      text-align: center;
+      font-size: 18px;
+      font-weight: 500;
+      margin-bottom: 24px;
+      color: #333;
+    }
+
+    :host([theme='dark']) .app-selector-title {
+      color: #e0e0e0;
+    }
+
+    .twint-apps-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      max-width: 400px;
+      margin: 0 auto 24px;
+    }
+
+    .twint-app-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    .twint-app-item:hover {
+      transform: scale(1.05);
+    }
+
+    .twint-app-logo {
+      width: 80px;
+      height: 80px;
+      border-radius: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      margin-bottom: 8px;
+    }
+
+    .twint-app-name {
+      font-size: 12px;
+      text-align: center;
+      color: #666;
+    }
+
+    :host([theme='dark']) .twint-app-name {
+      color: #b0b0b0;
+    }
+
+    .other-banks-container {
+      max-width: 400px;
+      margin: 0 auto 24px;
+    }
+
+    .other-banks-select {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: white;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    :host([theme='dark']) .other-banks-select {
+      background: #2a2a2a;
+      border-color: #444;
+      color: #e0e0e0;
+    }
+
+    .or-divider {
+      display: flex;
+      align-items: center;
+      margin: 24px 0;
+      max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .or-divider::before,
+    .or-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #ddd;
+    }
+
+    :host([theme='dark']) .or-divider::before,
+    :host([theme='dark']) .or-divider::after {
+      background: #444;
+    }
+
+    .or-divider span {
+      padding: 0 16px;
+      color: #999;
+      font-size: 14px;
+    }
+
+    .pairing-code-section {
+      text-align: center;
+      padding: 24px;
+      background: #f8f8f8;
+      border-radius: 12px;
+      max-width: 400px;
+      margin: 0 auto;
+    }
+
+    :host([theme='dark']) .pairing-code-section {
+      background: #2a2a2a;
+    }
+
+    .pairing-code-label {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 12px;
+    }
+
+    :host([theme='dark']) .pairing-code-label {
+      color: #b0b0b0;
+    }
+
+    .pairing-code {
+      font-size: 36px;
+      font-weight: bold;
+      letter-spacing: 0.2em;
+      color: #000;
+      font-family: 'Courier New', monospace;
+    }
+
+    :host([theme='dark']) .pairing-code {
+      color: #fff;
+    }
+
+    @media (max-width: 480px) {
+      .twint-apps-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+
+      .twint-app-logo {
+        width: 64px;
+        height: 64px;
+      }
+
+      .twint-app-name {
+        font-size: 11px;
+      }
     }
   `;
 
@@ -596,7 +773,6 @@ export class PayWithTwint extends LitElement {
     this.apiUrl = '/twint';
     this.confirmationNeeded = true;
     this.merchantName = '';
-    this.logoUrl = '';
     this.theme = 'light';
     this.redirectUrl = '';
     this.cancelOrderCallbackUrl = '';
@@ -620,6 +796,9 @@ export class PayWithTwint extends LitElement {
     this.textMerchantLabel = 'Merchant';
     this.textTotalAmountLabel = 'Total Amount';
     this.textAmountLabel = 'Amount';
+    this.textChooseApp = 'Choose your TWINT app:';
+    this.textOtherBanks = 'Other banks';
+    this.textEnterCode = 'Enter this code in your TWINT app:';
     
     // Control attributes
     this.start = false;
@@ -649,14 +828,26 @@ export class PayWithTwint extends LitElement {
   }
 
   render() {
-    // On mobile while redirecting, show button with spinner
-    if (this.#redirectingToMobile) {
-      return this.renderPayButton();
+    // On mobile while showing app selector
+    if (this.#showingAppSelector && this.order) {
+      return html`
+        <slot name="logo" style="display: none"></slot>
+        <slot name="bank-images" style="display: none"></slot>
+        <div class="container">
+          ${this.renderHeader()}
+          ${this.renderMobileAppSelector()}
+        </div>
+      `;
     }
+
 
     // Show Pay with TWINT button if not started yet
     if (!this.start && !this.order && !this.loading && !this.success && !this.cancelled) {
-      return this.renderPayButton();
+      return html`
+        <slot name="logo" style="display: none"></slot>
+        <slot name="bank-images" style="display: none"></slot>
+        ${this.renderPayButton()}
+      `;
     }
 
     // Don't render anything if no order and not in a special state
@@ -665,6 +856,8 @@ export class PayWithTwint extends LitElement {
     }
 
     return html`
+      <slot name="logo" style="display: none"></slot>
+      <slot name="bank-images" style="display: none"></slot>
       <div class="container">
         ${this.renderHeader()}
         ${this.renderContent()}
@@ -673,25 +866,23 @@ export class PayWithTwint extends LitElement {
   }
 
   renderPayButton() {
-    const isDisabled = (!this.reference || !this.amount) || this.#redirectingToMobile;
-    const isRedirecting = this.#redirectingToMobile;
+    const isDisabled = (!this.reference || !this.amount);
+    
+    // Get logo from slot
+    const logoElement = this.querySelector('[slot="logo"]');
+    const logoSrc = logoElement ? (logoElement.src || logoElement.getAttribute('src')) : null;
     
     return html`
       <div class="pay-button-container">
         <button 
-          class="pay-with-twint-button ${isRedirecting ? 'redirecting' : ''}" 
-          @click="${() => !isRedirecting && this.startPayment()}"
+          class="pay-with-twint-button" 
+          @click="${() => this.startPayment()}"
           ?disabled="${isDisabled}"
         >
-          ${isRedirecting ? html`
-            <span class="button-spinner"></span>
-            <span>Redirecting...</span>
-          ` : html`
-            <span>Pay with</span>
-            ${this.logoUrl ? html`
-              <img src="${this.logoUrl}" alt="TWINT" style="height: 24px; width: auto;" />
-            ` : ''}
-          `}
+          <span>Pay with</span>
+          ${logoSrc ? html`
+            <img src="${logoSrc}" alt="TWINT" style="height: 24px; width: auto;" />
+          ` : ''}
         </button>
       </div>
     `;
@@ -947,8 +1138,12 @@ export class PayWithTwint extends LitElement {
   }
 
   renderTwintLogo() {
-    if (this.logoUrl) {
-      return html`<img src="${this.logoUrl}" alt="TWINT" />`;
+    // Get logo from slot
+    const logoElement = this.querySelector('[slot="logo"]');
+    const logoSrc = logoElement ? (logoElement.src || logoElement.getAttribute('src')) : null;
+    
+    if (logoSrc) {
+      return html`<img src="${logoSrc}" alt="TWINT" />`;
     }
     
     return html`
@@ -956,6 +1151,86 @@ export class PayWithTwint extends LitElement {
         <rect width="120" height="40" rx="4" fill="#000"/>
         <text x="60" y="28" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="white" text-anchor="middle">TWINT</text>
       </svg>
+    `;
+  }
+
+  renderMobileAppSelector() {
+    if (!this.order?.pairingToken) {
+      return html`
+        <div class="error-message">
+          ${this.textErrorPairingToken}
+        </div>
+      `;
+    }
+
+    // Get bank images from slot
+    const bankImagesSlot = this.querySelector('slot[name="bank-images"]');
+    const bankImages = {};
+    
+    // Get all images from the bank-images slot
+    const slottedImages = this.querySelectorAll('[slot="bank-images"]');
+    slottedImages.forEach(img => {
+      const bankName = img.getAttribute('data-name');
+      if (bankName) {
+        bankImages[bankName] = img.src || img.getAttribute('src');
+      }
+    });
+
+    return html`
+      <div class="mobile-app-selector">
+        <div class="app-selector-title">${this.textChooseApp}</div>
+        
+        <div class="twint-apps-grid">
+          ${this.#twintApps.mainApps.map((app) => {
+            const imageUrl = bankImages[app.name] || '';
+            
+            return html`
+              <div class="twint-app-item" @click="${() => this.#openTwintApp(app.scheme)}">
+                ${imageUrl ? html`
+                  <img 
+                    src="${imageUrl}" 
+                    alt="${app.name}"
+                    class="twint-app-logo"
+                  />
+                ` : html`
+                  <div class="twint-app-logo" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #666;">
+                    ${app.name.replace(' TWINT', '').substring(0, 3)}
+                  </div>
+                `}
+                <span class="twint-app-name">${app.name.replace(' TWINT', '')}</span>
+              </div>
+            `;
+          })}
+        </div>
+
+        <div class="other-banks-container">
+          <select 
+            class="other-banks-select" 
+            @change="${(e) => {
+              if (e.target.value) {
+                this.#openTwintApp(e.target.value);
+                e.target.value = '';
+              }
+            }}"
+          >
+            <option value="">${this.textOtherBanks}</option>
+            ${this.#twintApps.otherBanks.map(bank => html`
+              <option value="${bank.scheme}">${bank.name}</option>
+            `)}
+          </select>
+        </div>
+
+        <div class="or-divider">
+          <span>or</span>
+        </div>
+
+        <div class="pairing-code-section">
+          <div class="pairing-code-label">${this.textEnterCode}</div>
+          <div class="pairing-code">
+            ${this.formatPairingToken(this.order.pairingToken)}
+          </div>
+        </div>
+      </div>
     `;
   }
 
@@ -1005,12 +1280,11 @@ export class PayWithTwint extends LitElement {
         composed: true
       }));
 
-      // Check if mobile device and redirect to TWINT app
+      // Check if mobile device and show app selector
       if (this.#isMobileDevice()) {
-        // Set flag to prevent desktop UI from rendering
-        this.#redirectingToMobile = true;
-        // Redirect immediately
-        this.#redirectToTwintApp();
+        // Show app selector interface
+        this.#showingAppSelector = true;
+        // Don't start polling on mobile
       } else {
         // Start polling automatically for desktop
         this.startPolling();
@@ -1097,6 +1371,7 @@ export class PayWithTwint extends LitElement {
 
       this.order = data.data;
       this.status = 'cancelled';
+      this.#showingAppSelector = false; // Hide app selector when cancelled
       this.stopPolling();
       
       this.dispatchEvent(new CustomEvent('payment-cancelled', { 
@@ -1182,30 +1457,39 @@ export class PayWithTwint extends LitElement {
     return /Android|iPhone|iPad/i.test(navigator.userAgent);
   }
 
-  #redirectToTwintApp() {
-    if (!this.order?.id) return;
+  #generateDeepLink(scheme, token) {
+    // Use the template from twint-apps.json
+    let deepLink = this.#twintApps.deeplinkTemplate;
     
-    // Only append orderID to URLs if encrypted order ID is available
-    let redirectUrl = this.redirectUrl || '';
-    let cancelUrl = this.cancelOrderCallbackUrl || '';
+    // Replace placeholders
+    deepLink = deepLink.replace('{{scheme}}', scheme);
+    deepLink = deepLink.replace('{{token}}', token);
     
-    if (this.#encryptedOrderId) {
-      redirectUrl = redirectUrl ? `${redirectUrl}${redirectUrl.includes('?') ? '&' : '?'}orderID=${this.#encryptedOrderId}` : '';
-      cancelUrl = cancelUrl ? `${cancelUrl}${cancelUrl.includes('?') ? '&' : '?'}orderID=${this.#encryptedOrderId}` : '';
-    }
-    
-    const twintUrl = new URL('https://pay.twint.ch/static-page/');
-    twintUrl.searchParams.set('orderUUID', this.order.id);
-    twintUrl.searchParams.set('cancelOrderCallbackURL', cancelUrl);
-    twintUrl.searchParams.set('redirectURL', redirectUrl);
-    twintUrl.searchParams.set('type', 'PAYMENT');
-    
-    window.location.href = twintUrl.toString();
+    return deepLink;
   }
+
+  #openTwintApp(scheme) {
+    if (!this.order?.pairingToken) {
+      console.error('No pairing token available');
+      return;
+    }
+
+    const deepLink = this.#generateDeepLink(scheme, this.order.pairingToken);
+    
+    // Try to open the app
+    window.location.href = deepLink;
+    
+    // Start polling after attempting to open the app
+    setTimeout(() => {
+      this.startPolling();
+    }, 2000);
+  }
+
 
   #handleStatusUpdate(order) {
     if (this.isOrderFinal()) {
       this.stopPolling();
+      this.#showingAppSelector = false; // Hide app selector when order is final
       
       switch (order.status) {
         case 'SUCCESS':
@@ -1237,6 +1521,7 @@ export class PayWithTwint extends LitElement {
       }
     } else if (order.status === 'PENDING_CONFIRMATION') {
       this.stopPolling();
+      this.#showingAppSelector = false; // Hide app selector when confirmation is needed
     }
   }
 

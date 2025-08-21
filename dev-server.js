@@ -15,7 +15,7 @@ import {
 dotenv.config();
 
 const app = express();
-const PORT = process.env.DEV_SERVER_PORT || 8000;
+const PORT = process.env.DEV_SERVER_PORT || 9000;
 
 // Configure logger
 const logger = winston.createLogger({
@@ -52,6 +52,14 @@ app.use((req, res, next) => {
     ip: req.ip,
     userAgent: req.get('user-agent'),
   });
+  next();
+});
+
+// TWINT client middleware - makes client available as req.twint
+app.use((req, res, next) => {
+  if (twintClient) {
+    req.twint = twintClient;
+  }
   next();
 });
 
@@ -101,12 +109,77 @@ async function initializeTwintClient() {
 
     cashRegisterId = process.env.TWINT_CASH_REGISTER_ID;
 
-    // Initialize client with required cash register ID
+    // Initialize client with required cash register ID and mandatory event handlers
     twintClient = new TwintClient({
       certificate,
       storeUuid: process.env.TWINT_STORE_UUID,
       environment,
       cashRegisterId: cashRegisterId,
+      handlers: {
+        success: (order) => {
+          logger.info('✅ Payment successful', { 
+            orderId: order.id.toString(),
+            amount: order.amount,
+            reference: order.merchantTransactionReference?.toString()
+          });
+          
+          // Update order in store
+          const storedOrder = orderStore.get(order.id.toString());
+          if (storedOrder) {
+            storedOrder.status = 'SUCCESS';
+            storedOrder.completedAt = new Date().toISOString();
+          }
+        },
+        
+        cancel: (order) => {
+          logger.warn('❌ Payment cancelled', {
+            orderId: order.id.toString(),
+            status: order.status.toString(),
+            reason: order.transactionStatus
+          });
+          
+          // Update order in store
+          const storedOrder = orderStore.get(order.id.toString());
+          if (storedOrder) {
+            storedOrder.status = order.status.toString();
+            storedOrder.cancelledAt = new Date().toISOString();
+          }
+        },
+        
+        error: (error, order) => {
+          logger.error('⚠️ Payment error', {
+            orderId: order?.id?.toString(),
+            error: error.message
+          });
+          
+          // Mark order as failed if we have the order ID
+          if (order?.id) {
+            const storedOrder = orderStore.get(order.id.toString());
+            if (storedOrder) {
+              storedOrder.status = 'ERROR';
+              storedOrder.error = error.message;
+              storedOrder.errorAt = new Date().toISOString();
+            }
+          }
+        },
+        
+        statusChange: (order) => {
+          logger.debug('📊 Order status update', {
+            orderId: order.id.toString(),
+            status: order.status.toString(),
+            transactionStatus: order.transactionStatus
+          });
+          
+          // Update stored order status
+          const storedOrder = orderStore.get(order.id.toString());
+          if (storedOrder) {
+            storedOrder.status = order.status.toString();
+            storedOrder.transactionStatus = order.transactionStatus;
+            storedOrder.lastUpdated = new Date().toISOString();
+          }
+        }
+      },
+      monitoringInterval: 2000 // Check every 2 seconds
     });
 
     logger.info('TWINT client initialized', {
@@ -144,7 +217,7 @@ async function initializeTwintClient() {
 // API Routes - Real TWINT operations with /twint prefix
 app.post('/twint/orders/start', async (req, res) => {
   try {
-    if (!twintClient) {
+    if (!req.twint) {
       throw new Error('TWINT client not initialized');
     }
 
@@ -159,11 +232,12 @@ app.post('/twint/orders/start', async (req, res) => {
 
     logger.info('Starting order', { reference, amount, confirmationNeeded });
 
-    // Start real TWINT order
-    const order = await twintClient.startOrder({
+    // Start real TWINT order - monitoring begins automatically
+    const order = await req.twint.startOrder({
       reference: reference || UnfiledMerchantTransactionReference.generate(),
       amount: Money.CHF(amount),
       confirmationNeeded,
+      autoMonitor: true // Enable automatic monitoring
     });
 
     // Use the QR code directly from TWINT response (it's already a base64 data URL)
@@ -201,15 +275,17 @@ app.post('/twint/orders/start', async (req, res) => {
 
     orderStore.set(orderData.id, orderData);
 
-    logger.info('Order started', {
+    logger.info('Order started with automatic monitoring', {
       orderId: orderData.id,
       reference: orderData.reference,
       amount: orderData.amount.value,
+      monitoring: 'active'
     });
 
     res.json({
       success: true,
       data: orderData,
+      message: 'Order started and monitoring automatically'
     });
   } catch (error) {
     logger.error('Failed to start order:', error.message);
@@ -222,45 +298,46 @@ app.post('/twint/orders/start', async (req, res) => {
 
 app.get('/twint/orders/:orderId', async (req, res) => {
   try {
-    if (!twintClient) {
-      throw new Error('TWINT client not initialized');
-    }
-
     const { orderId } = req.params;
 
-    logger.info('Monitoring order', { orderId });
-
-    // Monitor real TWINT order
-    const order = await twintClient.monitorOrder(orderId);
-
+    // Check if order exists in store (updated by event handlers)
     const storedOrder = orderStore.get(orderId);
-    const orderData = {
-      id: orderId,
-      reference: storedOrder?.reference,
-      amount: storedOrder?.amount || {
-        value: order.amount?.amount || 0,
-        currency: order.amount?.currency || 'CHF',
-      },
-      status: order.status.toString(),
-      transactionStatus: order.transactionStatus?.toString(),
-      pairingToken: storedOrder?.pairingToken,
-      qrCode: storedOrder?.qrCode,
-      confirmationNeeded: storedOrder?.confirmationNeeded,
-      updatedAt: new Date().toISOString(),
-    };
-
-    orderStore.set(orderId, orderData);
-
-    logger.info('Order monitored', {
-      orderId,
-      status: orderData.status,
-      transactionStatus: orderData.transactionStatus,
-    });
-
-    res.json({
-      success: true,
-      data: orderData,
-    });
+    
+    if (!storedOrder) {
+      // If not in store, try to fetch it
+      if (!req.twint) {
+        throw new Error('TWINT client not initialized');
+      }
+      
+      logger.info('Fetching order status', { orderId });
+      const order = await req.twint.monitorOrder(orderId);
+      
+      const orderData = {
+        id: orderId,
+        amount: {
+          value: order.amount?.amount || 0,
+          currency: order.amount?.currency || 'CHF',
+        },
+        status: order.status.toString(),
+        transactionStatus: order.transactionStatus?.toString(),
+        updatedAt: new Date().toISOString(),
+      };
+      
+      orderStore.set(orderId, orderData);
+      
+      res.json({
+        success: true,
+        data: orderData,
+        monitoring: false
+      });
+    } else {
+      // Return stored order (being updated by event handlers)
+      res.json({
+        success: true,
+        data: storedOrder,
+        monitoring: req.twint ? req.twint.stopMonitoring(orderId) : false
+      });
+    }
   } catch (error) {
     logger.error('Failed to monitor order:', error.message);
     res.status(500).json({
@@ -270,9 +347,35 @@ app.get('/twint/orders/:orderId', async (req, res) => {
   }
 });
 
+// New endpoint to stop monitoring an order
+app.post('/twint/orders/:orderId/stop-monitoring', async (req, res) => {
+  try {
+    if (!req.twint) {
+      throw new Error('TWINT client not initialized');
+    }
+
+    const { orderId } = req.params;
+    const stopped = req.twint.stopMonitoring(orderId);
+
+    logger.info('Stopped monitoring order', { orderId, stopped });
+
+    res.json({
+      success: true,
+      stopped,
+      message: stopped ? 'Monitoring stopped' : 'Order was not being monitored'
+    });
+  } catch (error) {
+    logger.error('Failed to stop monitoring:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 app.post('/twint/orders/:orderId/confirm', async (req, res) => {
   try {
-    if (!twintClient) {
+    if (!req.twint) {
       throw new Error('TWINT client not initialized');
     }
 
@@ -289,7 +392,7 @@ app.post('/twint/orders/:orderId/confirm', async (req, res) => {
     logger.info('Confirming order', { orderId, amount });
 
     // Confirm real TWINT order
-    const order = await twintClient.confirmOrder(orderId, Money.CHF(amount));
+    const order = await req.twint.confirmOrder(orderId, Money.CHF(amount));
 
     const storedOrder = orderStore.get(orderId) || {};
     const orderData = {
@@ -322,7 +425,7 @@ app.post('/twint/orders/:orderId/confirm', async (req, res) => {
 
 app.post('/twint/orders/:orderId/cancel', async (req, res) => {
   try {
-    if (!twintClient) {
+    if (!req.twint) {
       throw new Error('TWINT client not initialized');
     }
 
@@ -331,7 +434,7 @@ app.post('/twint/orders/:orderId/cancel', async (req, res) => {
     logger.info('Cancelling order', { orderId });
 
     // Cancel real TWINT order
-    const order = await twintClient.cancelOrder(orderId);
+    const order = await req.twint.cancelOrder(orderId);
 
     const storedOrder = orderStore.get(orderId) || {};
     const orderData = {
@@ -366,16 +469,20 @@ app.get('/twint/health', async (req, res) => {
   const health = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    twintClient: twintClient !== null,
+    twintClient: req.twint !== undefined,
     cashRegister: {
       enrolled: cashRegisterId !== null,
       id: cashRegisterId ? cashRegisterId.substring(0, 8) + '...' : null,
     },
+    monitoring: {
+      active: req.twint ? req.twint.getActiveMonitorsCount() : 0,
+      enabled: true
+    }
   };
 
-  if (twintClient) {
+  if (req.twint) {
     try {
-      const systemStatus = await twintClient.checkSystemStatus();
+      const systemStatus = await req.twint.checkSystemStatus();
       health.twintSystem = systemStatus;
     } catch (error) {
       health.twintSystem = {
@@ -429,11 +536,12 @@ async function startServer() {
 ╚════════════════════════════════════════════════╝
 
 API Endpoints (Real TWINT):
-- POST /twint/orders/start         Start new order
-- GET  /twint/orders/:orderId      Monitor order
-- POST /twint/orders/:orderId/confirm  Confirm order
-- POST /twint/orders/:orderId/cancel   Cancel order
-- GET  /twint/health               Health check
+- POST /twint/orders/start                Start new order (auto-monitors)
+- GET  /twint/orders/:orderId            Get order status
+- POST /twint/orders/:orderId/stop-monitoring  Stop monitoring
+- POST /twint/orders/:orderId/confirm    Confirm order
+- POST /twint/orders/:orderId/cancel     Cancel order
+- GET  /twint/health                     Health check
 
 ${process.env.SOAP_DEBUG === 'true' ? '📋 SOAP debugging enabled - XML requests/responses will be shown in console' : '💡 Tip: Set SOAP_DEBUG=true in .env to see formatted XML requests/responses'}
     `);
@@ -445,6 +553,13 @@ let server;
 
 process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down gracefully...');
+  
+  // Stop all monitoring before shutdown
+  if (twintClient) {
+    logger.info('Stopping all order monitoring...');
+    twintClient.stopAllMonitoring();
+  }
+  
   if (server) {
     await new Promise((resolve) => {
       server.close(resolve);
@@ -455,6 +570,13 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   logger.info('SIGINT received, shutting down gracefully...');
+  
+  // Stop all monitoring before shutdown
+  if (twintClient) {
+    logger.info('Stopping all order monitoring...');
+    twintClient.stopAllMonitoring();
+  }
+  
   if (server) {
     await new Promise((resolve) => {
       server.close(resolve);

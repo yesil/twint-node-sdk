@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { TwintSoapClient } from '../soap/SoapClient.js';
 import { OrderStatus } from '../values/OrderStatus.js';
 import { OrderId, StoreUuid } from '../values/Uuid.js';
@@ -6,15 +7,18 @@ import { CryptoUtil } from '../utils/crypto.js';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
- * Main TWINT SDK client
+ * Main TWINT SDK client with event-driven architecture
  */
-export class TwintClient {
+export class TwintClient extends EventEmitter {
   #soapClient;
   #storeUuid;
   #cashRegisterId;
   #enrollmentDetails;
   #initialized;
   #crypto;
+  #activeMonitors;
+  #maxConcurrentMonitors;
+  #monitoringInterval;
 
   /**
    * @param {Object} config
@@ -22,21 +26,54 @@ export class TwintClient {
    * @param {string|import('../values/Uuid.js').StoreUuid} config.storeUuid
    * @param {import('../values/Environment.js').Environment} config.environment
    * @param {string} config.cashRegisterId Required cash register ID
+   * @param {Object} config.handlers Required event handlers
+   * @param {Function} config.handlers.success Handler for successful payments
+   * @param {Function} config.handlers.cancel Handler for cancelled payments
+   * @param {Function} config.handlers.error Handler for errors
+   * @param {Function} [config.handlers.statusChange] Optional handler for status changes
    * @param {string} [config.version='v8.6']
    * @param {string} [config.orderSecret] Secret key for encrypting order IDs
+   * @param {number} [config.maxConcurrentMonitors=100] Maximum concurrent order monitors
+   * @param {number} [config.monitoringInterval=2000] Monitoring interval in milliseconds
    */
   constructor(config) {
+    super();
     const { 
       certificate, 
       storeUuid, 
       environment, 
       cashRegisterId,
+      handlers,
       version = 'v8.6',
-      orderSecret
+      orderSecret,
+      maxConcurrentMonitors = 100,
+      monitoringInterval = 2000
     } = config;
 
     if (!cashRegisterId) {
       throw new Error('cashRegisterId is required');
+    }
+
+    // Validate mandatory handlers
+    if (!handlers || typeof handlers !== 'object') {
+      throw new Error('handlers object is required');
+    }
+    if (!handlers.success || typeof handlers.success !== 'function') {
+      throw new Error('handlers.success function is mandatory');
+    }
+    if (!handlers.cancel || typeof handlers.cancel !== 'function') {
+      throw new Error('handlers.cancel function is mandatory');
+    }
+    if (!handlers.error || typeof handlers.error !== 'function') {
+      throw new Error('handlers.error function is mandatory');
+    }
+
+    // Register event handlers
+    this.on('success', handlers.success);
+    this.on('cancel', handlers.cancel);
+    this.on('error', handlers.error);
+    if (handlers.statusChange && typeof handlers.statusChange === 'function') {
+      this.on('statusChange', handlers.statusChange);
     }
 
     this.#soapClient = new TwintSoapClient(certificate, environment, version);
@@ -47,6 +84,26 @@ export class TwintClient {
     
     // Initialize crypto with provided secret or default
     this.#crypto = orderSecret ? new CryptoUtil(orderSecret) : CryptoUtil.createDefault();
+    
+    // Initialize monitoring state
+    this.#activeMonitors = new Map();
+    this.#maxConcurrentMonitors = maxConcurrentMonitors;
+    this.#monitoringInterval = monitoringInterval;
+    
+    // Bind middleware method to preserve context
+    this.middleware = this.middleware.bind(this);
+  }
+
+  /**
+   * Express middleware method
+   * Usage: app.use(twintClient.middleware)
+   * @param {Object} req Express request object
+   * @param {Object} res Express response object
+   * @param {Function} next Express next function
+   */
+  middleware(req, res, next) {
+    req.twint = this;
+    next();
   }
 
 
@@ -182,14 +239,106 @@ export class TwintClient {
   }
 
   /**
-   * Start a new payment order
+   * Start monitoring an order
+   * @private
+   * @param {string} orderId Order ID to monitor
+   * @param {Object} initialOrder Initial order data
+   */
+  #startMonitoring(orderId, initialOrder) {
+    // Check if already monitoring
+    if (this.#activeMonitors.has(orderId)) {
+      return;
+    }
+
+    // Check max concurrent monitors
+    if (this.#activeMonitors.size >= this.#maxConcurrentMonitors) {
+      this.emit('error', new Error('Maximum concurrent monitors reached'), initialOrder);
+      return;
+    }
+
+    let lastStatus = initialOrder.status?.toString();
+    
+    const intervalId = setInterval(async () => {
+      try {
+        const order = await this.monitorOrder(orderId);
+        const currentStatus = order.status.toString();
+        
+        // Emit status change if different
+        if (currentStatus !== lastStatus) {
+          lastStatus = currentStatus;
+          this.emit('statusChange', order);
+          
+          // Check for final states
+          if (order.status.isSuccessful() || order.status.isConfirmed()) {
+            this.emit('success', order);
+            this.#stopMonitoring(orderId);
+          } else if (order.status.isCancelled() || order.status.isFailed()) {
+            this.emit('cancel', order);
+            this.#stopMonitoring(orderId);
+          }
+        }
+      } catch (error) {
+        // Emit error but continue monitoring
+        this.emit('error', error, { id: orderId });
+      }
+    }, this.#monitoringInterval);
+    
+    this.#activeMonitors.set(orderId, intervalId);
+  }
+
+  /**
+   * Stop monitoring an order
+   * @param {string} orderId Order ID to stop monitoring
+   * @returns {boolean} True if monitoring was stopped, false if not found
+   */
+  stopMonitoring(orderId) {
+    return this.#stopMonitoring(orderId);
+  }
+
+  /**
+   * Stop monitoring an order (internal)
+   * @private
+   * @param {string} orderId Order ID to stop monitoring
+   * @returns {boolean} True if monitoring was stopped, false if not found
+   */
+  #stopMonitoring(orderId) {
+    const intervalId = this.#activeMonitors.get(orderId);
+    if (intervalId) {
+      clearInterval(intervalId);
+      this.#activeMonitors.delete(orderId);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Get number of active monitors
+   * @returns {number} Number of orders being monitored
+   */
+  getActiveMonitorsCount() {
+    return this.#activeMonitors.size;
+  }
+
+  /**
+   * Stop all active monitors
+   */
+  stopAllMonitoring() {
+    for (const [orderId, intervalId] of this.#activeMonitors) {
+      clearInterval(intervalId);
+    }
+    this.#activeMonitors.clear();
+  }
+
+  /**
+   * Start a new payment order with automatic monitoring
    * @param {Object} params
    * @param {string|import('../values/MerchantTransactionReference.js').UnfiledMerchantTransactionReference} params.reference
    * @param {import('../values/Money.js').Money} params.amount
    * @param {boolean} [params.confirmationNeeded=true]
+   * @param {boolean} [params.autoMonitor=true] Automatically start monitoring the order
    * @returns {Promise<Object>}
    */
-  async startOrder({ reference, amount, confirmationNeeded = true }) {
+  async startOrder({ reference, amount, confirmationNeeded = true, autoMonitor = true }) {
     try {
       const merchantRef = typeof reference === 'string' ? reference : reference.value;
 
@@ -239,7 +388,7 @@ export class TwintClient {
         reasonValue = 'UNKNOWN';
       }
 
-      return {
+      const order = {
         id: OrderId.fromString(response.OrderUuid),
         merchantTransactionReference: FiledMerchantTransactionReference.fromString(merchantRef),
         status: OrderStatus.fromString(statusValue),
@@ -249,6 +398,13 @@ export class TwintClient {
         pairingToken: response.Token,
         qrCode: response.QRCode,
       };
+      
+      // Automatically start monitoring if requested
+      if (autoMonitor) {
+        this.#startMonitoring(order.id.toString(), order);
+      }
+      
+      return order;
     } catch (error) {
       throw new Error(`Failed to start order: ${error.message}`);
     }

@@ -2,15 +2,14 @@ import { esbuildPlugin } from '@web/dev-server-esbuild';
 import proxy from 'koa-proxies';
 
 export default {
-  port: 3000,
+  port: 4000,
   nodeResolve: true,
   open: '/demo/',
   watch: true,
   
-  // Proxy /twint requests to API server on port 8000
   middleware: [
     proxy('/twint', {
-      target: 'http://localhost:8000',
+      target: 'http://localhost:9000',
       changeOrigin: true,
       logs: true,
       events: {
@@ -18,7 +17,7 @@ export default {
           console.error('[PROXY ERROR]', err);
         },
         proxyReq: (proxyReq, req, res) => {
-          console.log(`[PROXY] ${req.method} ${req.url} -> http://localhost:8000${req.url}`);
+          console.log(`[PROXY] ${req.method} ${req.url} -> http://localhost:9000${req.url}`);
         }
       }
     })

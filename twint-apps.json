@@ -1,0 +1,307 @@
+{
+  "mainApps": [
+    {
+      "name": "UBS TWINT",
+      "image": "bank-ubs.png",
+      "scheme": "twint-issuer2",
+      "displayOrder": 1
+    },
+    {
+      "name": "PostFinance TWINT",
+      "image": "bank-pf.png",
+      "scheme": "twint-issuer7",
+      "displayOrder": 2
+    },
+    {
+      "name": "Raiffeisen TWINT",
+      "image": "bank-raiffeisen.png",
+      "scheme": "twint-issuer6",
+      "displayOrder": 3
+    },
+    {
+      "name": "Credit Suisse TWINT",
+      "image": "bank-cs.png",
+      "scheme": "twint-issuer4",
+      "displayOrder": 4
+    },
+    {
+      "name": "ZKB TWINT",
+      "image": "bank-zkb.png",
+      "scheme": "twint-issuer3",
+      "displayOrder": 5
+    },
+    {
+      "name": "BCV TWINT",
+      "image": "bank-bcv.png",
+      "scheme": "twint-issuer5",
+      "displayOrder": 6
+    }
+  ],
+  "otherBanks": [
+    {
+      "name": "ABS TWINT",
+      "scheme": "twint-issuer56"
+    },
+    {
+      "name": "acrevis TWINT",
+      "scheme": "twint-issuer41"
+    },
+    {
+      "name": "AEK TWINT",
+      "scheme": "twint-issuer25"
+    },
+    {
+      "name": "AKB TWINT",
+      "scheme": "twint-issuer30"
+    },
+    {
+      "name": "Alpha RHEINTAL Bank TWINT",
+      "scheme": "twint-issuer42"
+    },
+    {
+      "name": "AppKB TWINT",
+      "scheme": "twint-issuer12"
+    },
+    {
+      "name": "Baloise TWINT",
+      "scheme": "twint-issuer33"
+    },
+    {
+      "name": "BancaStato TWINT",
+      "scheme": "twint-issuer36"
+    },
+    {
+      "name": "Bank Avera TWINT",
+      "scheme": "twint-issuer40"
+    },
+    {
+      "name": "Bank BSU TWINT",
+      "scheme": "twint-issuer48"
+    },
+    {
+      "name": "Bank Cler TWINT",
+      "scheme": "twint-issuer58"
+    },
+    {
+      "name": "Bank EKI TWINT",
+      "scheme": "twint-issuer52"
+    },
+    {
+      "name": "Bank Gantrisch TWINT",
+      "scheme": "twint-issuer53"
+    },
+    {
+      "name": "Bank Leerau TWINT",
+      "scheme": "twint-issuer70"
+    },
+    {
+      "name": "Bank Oberuzwil TWINT",
+      "scheme": "twint-issuer61"
+    },
+    {
+      "name": "Bank Thalwil TWINT",
+      "scheme": "twint-issuer43"
+    },
+    {
+      "name": "Bank WIR TWINT",
+      "scheme": "twint-issuer51"
+    },
+    {
+      "name": "Bank Zimmerberg TWINT",
+      "scheme": "twint-issuer69"
+    },
+    {
+      "name": "Banque du Leman TWINT",
+      "scheme": "twint-issuer46"
+    },
+    {
+      "name": "BCF TWINT",
+      "scheme": "twint-issuer16"
+    },
+    {
+      "name": "BCGE TWINT",
+      "scheme": "twint-issuer10"
+    },
+    {
+      "name": "BCJ TWINT",
+      "scheme": "twint-issuer17"
+    },
+    {
+      "name": "BCN TWINT",
+      "scheme": "twint-issuer18"
+    },
+    {
+      "name": "BCVs TWINT",
+      "scheme": "twint-issuer13"
+    },
+    {
+      "name": "BEKB TWINT",
+      "scheme": "twint-issuer23"
+    },
+    {
+      "name": "Bernerland Bank TWINT",
+      "scheme": "twint-issuer44"
+    },
+    {
+      "name": "Biene Bank TWINT",
+      "scheme": "twint-issuer60"
+    },
+    {
+      "name": "BKB TWINT",
+      "scheme": "twint-issuer59"
+    },
+    {
+      "name": "BLKB TWINT",
+      "scheme": "twint-issuer26"
+    },
+    {
+      "name": "BPS TWINT",
+      "scheme": "twint-issuer67"
+    },
+    {
+      "name": "BSD TWINT",
+      "scheme": "twint-issuer49"
+    },
+    {
+      "name": "CA next bank TWINT",
+      "scheme": "twint-issuer37"
+    },
+    {
+      "name": "Clientis CEC TWINT",
+      "scheme": "twint-issuer62"
+    },
+    {
+      "name": "EEK TWINT",
+      "scheme": "twint-issuer72"
+    },
+    {
+      "name": "EKSH TWINT",
+      "scheme": "twint-issuer66"
+    },
+    {
+      "name": "GKB TWINT",
+      "scheme": "twint-issuer15"
+    },
+    {
+      "name": "GLKB TWINT",
+      "scheme": "twint-issuer22"
+    },
+    {
+      "name": "GRB TWINT",
+      "scheme": "twint-issuer47"
+    },
+    {
+      "name": "HBL TWINT",
+      "scheme": "twint-issuer45"
+    },
+    {
+      "name": "Leihkasse TWINT",
+      "scheme": "twint-issuer63"
+    },
+    {
+      "name": "LLB Schweiz TWINT",
+      "scheme": "twint-issuer38"
+    },
+    {
+      "name": "LUKB TWINT",
+      "scheme": "twint-issuer32"
+    },
+    {
+      "name": "Migros Bank TWINT",
+      "scheme": "twint-issuer21"
+    },
+    {
+      "name": "NKB TWINT",
+      "scheme": "twint-issuer29"
+    },
+    {
+      "name": "OKB TWINT",
+      "scheme": "twint-issuer8"
+    },
+    {
+      "name": "Radicant TWINT",
+      "scheme": "twint-issuer28"
+    },
+    {
+      "name": "RBM TWINT",
+      "scheme": "twint-issuer68"
+    },
+    {
+      "name": "Regiobank TWINT",
+      "scheme": "twint-issuer55"
+    },
+    {
+      "name": "Saanen Bank TWINT",
+      "scheme": "twint-issuer57"
+    },
+    {
+      "name": "SGKB TWINT",
+      "scheme": "twint-issuer14"
+    },
+    {
+      "name": "SHKB TWINT",
+      "scheme": "twint-issuer24"
+    },
+    {
+      "name": "SLB TWINT",
+      "scheme": "twint-issuer71"
+    },
+    {
+      "name": "SLF TWINT",
+      "scheme": "twint-issuer54"
+    },
+    {
+      "name": "SLM TWINT",
+      "scheme": "twint-issuer74"
+    },
+    {
+      "name": "Sparcassa 1816 TWINT",
+      "scheme": "twint-issuer64"
+    },
+    {
+      "name": "Sparkasse TWINT",
+      "scheme": "twint-issuer73"
+    },
+    {
+      "name": "Swissquote TWINT",
+      "scheme": "twint-issuer27"
+    },
+    {
+      "name": "SZKB TWINT",
+      "scheme": "twint-issuer31"
+    },
+    {
+      "name": "TKB TWINT",
+      "scheme": "twint-issuer19"
+    },
+    {
+      "name": "TWINT – andere Banken & Prepaid",
+      "scheme": "twint-issuer1"
+    },
+    {
+      "name": "UKB TWINT",
+      "scheme": "twint-issuer34"
+    },
+    {
+      "name": "Valiant TWINT",
+      "scheme": "twint-issuer20"
+    },
+    {
+      "name": "VZ TWINT",
+      "scheme": "twint-issuer39"
+    },
+    {
+      "name": "yuh TWINT",
+      "scheme": "twint-issuer35"
+    },
+    {
+      "name": "ZLB TWINT",
+      "scheme": "twint-issuer65"
+    },
+    {
+      "name": "ZugerKB TWINT",
+      "scheme": "twint-issuer9"
+    }
+  ],
+  "deeplinkTemplate": "{{scheme}}://applinks/?al_applink_data={\"app_action_type\":\"TWINT_PAYMENT\",\"extras\": {\"code\": \"{{token}}\",},\"referer_app_link\": {\"target_url\": \"\", \"url\": \"\", \"app_name\": \"EXTERNAL_WEB_BROWSER\"}, \"version\": \"6.0\"}"
+}

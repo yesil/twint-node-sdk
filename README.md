@@ -111,7 +111,7 @@ The SDK includes a ready-to-use web component for TWINT payments.
 <pay-with-twint 
   reference="ORDER-123"
   amount="99.95"
-  api-url="/api">
+  api-url="/twint">
 </pay-with-twint>
 ```
 
