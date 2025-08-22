@@ -62,6 +62,7 @@ export class PayWithTwint extends LitElement {
     textChooseApp: { type: String, attribute: 'text-choose-app' },
     textOtherBanks: { type: String, attribute: 'text-other-banks' },
     textEnterCode: { type: String, attribute: 'text-enter-code' },
+    textOr: { type: String, attribute: 'text-or' },
     
     // Control attributes
     start: { type: Boolean },
@@ -762,6 +763,63 @@ export class PayWithTwint extends LitElement {
         font-size: 11px;
       }
     }
+
+    /* iOS fullscreen styles for IN_PROGRESS status */
+    .container.fullscreen-ios {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100vw;
+      height: 100vh;
+      max-width: none;
+      border-radius: 0;
+      margin: 0;
+      z-index: 9999;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .container.fullscreen-ios .header {
+      flex-shrink: 0;
+    }
+
+    .container.fullscreen-ios .mobile-app-selector {
+      flex: 1;
+      overflow-y: auto;
+      padding-bottom: env(safe-area-inset-bottom, 20px);
+    }
+
+    .payment-content.fullscreen-ios,
+    .payment-instructions.fullscreen-ios {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999;
+      width: 100vw;
+      margin: 0;
+      max-width: none;
+    }
+
+    .payment-content.fullscreen-ios {
+      height: calc(100vh - 120px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 40px 20px;
+      gap: 30px;
+    }
+
+    .payment-instructions.fullscreen-ios {
+      bottom: 0;
+      top: auto;
+      height: 120px;
+      border-radius: 0;
+    }
   `;
 
   constructor() {
@@ -799,6 +857,7 @@ export class PayWithTwint extends LitElement {
     this.textChooseApp = 'Choose your TWINT app:';
     this.textOtherBanks = 'Other banks';
     this.textEnterCode = 'Enter this code in your TWINT app:';
+    this.textOr = 'or';
     
     // Control attributes
     this.start = false;
@@ -830,10 +889,14 @@ export class PayWithTwint extends LitElement {
   render() {
     // On mobile while showing app selector
     if (this.#showingAppSelector && this.order) {
+      const isIOS = /iPhone|iPad/i.test(navigator.userAgent);
+      const isInProgress = this.order?.status === 'IN_PROGRESS';
+      const shouldCoverFullScreen = isIOS && isInProgress;
+      
       return html`
         <slot name="logo" style="display: none"></slot>
         <slot name="bank-images" style="display: none"></slot>
-        <div class="container">
+        <div class="container ${shouldCoverFullScreen ? 'fullscreen-ios' : ''}">
           ${this.renderHeader()}
           ${this.renderMobileAppSelector()}
         </div>
@@ -1035,9 +1098,14 @@ export class PayWithTwint extends LitElement {
   }
 
   renderPaymentStatus() {
+    // Check if iOS and IN_PROGRESS
+    const isIOS = /iPhone|iPad/i.test(navigator.userAgent);
+    const isInProgress = this.order?.status === 'IN_PROGRESS';
+    const shouldCoverFullScreen = isIOS && isInProgress;
+    
     // Always render QR code section - it will show error if missing
     return html`
-      <div class="payment-content">
+      <div class="payment-content ${shouldCoverFullScreen ? 'fullscreen-ios' : ''}">
         <div class="payment-left">
           ${this.renderQRCode()}
           ${this.order.pairingToken ? html`
@@ -1059,7 +1127,7 @@ export class PayWithTwint extends LitElement {
           </div>
         </div>
       </div>
-      <div class="payment-instructions">
+      <div class="payment-instructions ${shouldCoverFullScreen ? 'fullscreen-ios' : ''}">
         <div class="instruction-left">
           <div class="qr-icon">📱</div>
           <p>${this.textScanInstruction}</p>
@@ -1164,7 +1232,6 @@ export class PayWithTwint extends LitElement {
     }
 
     // Get bank images from slot
-    const bankImagesSlot = this.querySelector('slot[name="bank-images"]');
     const bankImages = {};
     
     // Get all images from the bank-images slot
@@ -1221,7 +1288,7 @@ export class PayWithTwint extends LitElement {
         </div>
 
         <div class="or-divider">
-          <span>or</span>
+          <span>${this.textOr}</span>
         </div>
 
         <div class="pairing-code-section">
