@@ -40,7 +40,8 @@
   },
   "dependencies": {
     "soap": "^1.0.0",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "winston": "^3.17.0"
   },
   "optionalDependencies": {
     "concurrently": "^8.2.2",
@@ -49,7 +50,6 @@
     "express": "^4.18.2",
     "lit": "^3.1.0",
     "qrcode": "^1.5.3",
-    "winston": "^3.11.0",
     "xml-formatter": "^3.6.6"
   },
   "devDependencies": {
