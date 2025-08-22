@@ -160,14 +160,14 @@ export class PayWithTwint extends LitElement {
     }
 
     .twint-logo-header {
-      height: 58px;
+      height: 40px;
       display: flex;
       align-items: center;
     }
 
     .twint-logo-header svg,
     .twint-logo-header img {
-      height: 58px;
+      height: 40px;
       width: auto;
     }
 
@@ -411,14 +411,14 @@ export class PayWithTwint extends LitElement {
     }
 
     .success-title {
-      font-size: 28px;
+      font-size: 24px;
       font-weight: 600;
       color: #155724;
       margin: 0 0 12px 0;
     }
 
     .success-subtitle {
-      font-size: 18px;
+      font-size: 16px;
       color: #666;
       margin: 0 0 32px 0;
     }
@@ -510,14 +510,14 @@ export class PayWithTwint extends LitElement {
     }
 
     .cancelled-title {
-      font-size: 28px;
+      font-size: 24px;
       font-weight: 600;
       color: #6c757d;
       margin: 0 0 12px 0;
     }
 
     .cancelled-subtitle {
-      font-size: 18px;
+      font-size: 16px;
       color: #666;
       margin: 0 0 32px 0;
     }
