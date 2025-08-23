@@ -12,7 +12,7 @@ import { twintApps } from './twint-apps.js';
  * @property {number} amount - Payment amount in CHF
  * @property {boolean} start - Auto-start payment when true (requires reference and amount)
  * @property {string} apiUrl - Base API URL (default: '/twint')
- * @property {boolean} confirmationNeeded - Whether manual confirmation is required (default: true)
+ * @property {boolean} confirmationNeeded - Whether manual confirmation is required (default: false)
  * 
  * @fires payment-started - When payment is initiated
  * @fires payment-completed - When payment is successfully completed
@@ -34,7 +34,7 @@ export class PayWithTwint extends LitElement {
     reference: { type: String },
     amount: { type: Number },
     apiUrl: { type: String, attribute: 'api-url' },
-    confirmationNeeded: { type: Boolean, attribute: 'confirmation-needed' },
+    confirmationNeeded: { type: Boolean, attribute: 'confirmation-needed', reflect: true },
     merchantName: { type: String, attribute: 'merchant-name' },
     theme: { type: String },
     redirectUrl: { type: String, attribute: 'redirect-url' },
@@ -829,7 +829,7 @@ export class PayWithTwint extends LitElement {
     this.reference = '';
     this.amount = null;
     this.apiUrl = '/twint';
-    this.confirmationNeeded = true;
+    this.confirmationNeeded = false;
     this.merchantName = '';
     this.theme = 'light';
     this.redirectUrl = '';

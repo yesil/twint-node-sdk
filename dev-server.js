@@ -56,9 +56,86 @@ async function startServer() {
   try {
     // Initialize TWINT client from environment - handles everything internally
     twintClient = await TwintClient.fromEnvironment({ logger });
+    
+    // Add enhanced callback logging by listening to client events
+    twintClient.on('success', (order) => {
+      logger.info('🎉 Payment callback: SUCCESS', {
+        event: 'payment_success',
+        orderId: order.id.toString(),
+        amount: order.amount,
+        reference: order.merchantTransactionReference?.toString(),
+        status: order.status.toString(),
+        transactionStatus: order.transactionStatus,
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    twintClient.on('cancel', (order) => {
+      logger.warn('❌ Payment callback: CANCELLED', {
+        event: 'payment_cancelled', 
+        orderId: order.id.toString(),
+        status: order.status.toString(),
+        reason: order.transactionStatus,
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    twintClient.on('error', (error, order) => {
+      logger.error('⚠️ Payment callback: ERROR', {
+        event: 'payment_error',
+        orderId: order?.id?.toString() || 'unknown',
+        error: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    twintClient.on('statusChange', (order) => {
+      logger.info('📊 Payment callback: STATUS_CHANGE', {
+        event: 'status_change',
+        orderId: order.id.toString(),
+        status: order.status.toString(),
+        transactionStatus: order.transactionStatus,
+        timestamp: new Date().toISOString()
+      });
+    });
 
-    // Single line to handle ALL TWINT routes
-    app.use('/twint', twintClient.middleware);
+    // Create enhanced middleware wrapper with callback logging
+    const enhancedMiddleware = (req, res, next) => {
+      // Log incoming requests
+      logger.info('📥 TWINT API request', {
+        method: req.method,
+        path: req.path,
+        body: req.body,
+        query: req.query,
+        timestamp: new Date().toISOString()
+      });
+
+      // Wrap res.json to log responses
+      const originalJson = res.json;
+      res.json = function(data) {
+        logger.info('📤 TWINT API response', {
+          method: req.method,
+          path: req.path,
+          statusCode: res.statusCode,
+          success: data?.success,
+          data: data?.data ? {
+            orderId: data.data.id,
+            status: data.data.status,
+            amount: data.data.amount
+          } : null,
+          error: data?.error,
+          timestamp: new Date().toISOString()
+        });
+        return originalJson.call(this, data);
+      };
+
+      // Call the original TWINT middleware
+      return twintClient.middleware(req, res, next);
+    };
+
+    // Use enhanced middleware for all TWINT routes
+    app.use('/twint', enhancedMiddleware);
 
     // Start server
     server = app.listen(PORT, () => {

@@ -23,7 +23,12 @@ export class TwintClient extends EventEmitter {
   #activeMonitors;
   #maxConcurrentMonitors;
   #monitoringInterval;
+  #monitoringTimeout;
+  #maxMonitoringErrors;
+  #orderStoreTTL;
   #orderStore;
+  #monitoringMetadata;
+  #cleanupIntervalId;
   #logger;
 
   /**
@@ -37,11 +42,15 @@ export class TwintClient extends EventEmitter {
    * @param {Function} [config.handlers.cancel] Handler for cancelled payments
    * @param {Function} [config.handlers.error] Handler for errors
    * @param {Function} [config.handlers.statusChange] Optional handler for status changes
+   * @param {Function} [config.handlers.timeout] Optional handler for monitoring timeouts
    * @param {Object} [config.logger] Optional logger instance
    * @param {string} [config.version='v8.6']
    * @param {string} [config.orderSecret] Secret key for encrypting order IDs
    * @param {number} [config.maxConcurrentMonitors=100] Maximum concurrent order monitors
    * @param {number} [config.monitoringInterval=2000] Monitoring interval in milliseconds
+   * @param {number} [config.monitoringTimeout=1800000] Maximum monitoring duration in milliseconds (default: 30 minutes)
+   * @param {number} [config.maxMonitoringErrors=5] Maximum consecutive errors before stopping monitoring
+   * @param {number} [config.orderStoreTTL=86400000] Order store TTL in milliseconds (default: 24 hours)
    */
   constructor(config) {
     super();
@@ -55,7 +64,10 @@ export class TwintClient extends EventEmitter {
       version = 'v8.6',
       orderSecret,
       maxConcurrentMonitors = 100,
-      monitoringInterval = 2000
+      monitoringInterval = 2000,
+      monitoringTimeout = 30 * 60 * 1000, // 30 minutes
+      maxMonitoringErrors = 5,
+      orderStoreTTL = 24 * 60 * 60 * 1000 // 24 hours
     } = config;
 
     if (!cashRegisterId) {
@@ -75,10 +87,14 @@ export class TwintClient extends EventEmitter {
     if (handlers.statusChange && typeof handlers.statusChange === 'function') {
       this.on('statusChange', handlers.statusChange);
     }
+    if (handlers.timeout && typeof handlers.timeout === 'function') {
+      this.on('timeout', handlers.timeout);
+    }
 
     // Set up internal handlers for order store management
     this.on('success', (order) => this.#updateOrderStore(order, 'SUCCESS'));
     this.on('cancel', (order) => this.#updateOrderStore(order, 'CANCELLED'));
+    this.on('timeout', (order) => this.#updateOrderStore(order, 'TIMEOUT'));
     this.on('statusChange', (order) => this.#updateOrderStore(order));
 
     this.#soapClient = new TwintSoapClient(certificate, environment, version);
@@ -94,10 +110,17 @@ export class TwintClient extends EventEmitter {
     this.#activeMonitors = new Map();
     this.#maxConcurrentMonitors = maxConcurrentMonitors;
     this.#monitoringInterval = monitoringInterval;
+    this.#monitoringTimeout = monitoringTimeout;
+    this.#maxMonitoringErrors = maxMonitoringErrors;
+    this.#orderStoreTTL = orderStoreTTL;
     
-    // Initialize order store and logger
+    // Initialize order store and monitoring metadata
     this.#orderStore = new Map();
+    this.#monitoringMetadata = new Map(); // Stores: { errorCount, startTime, timeoutId }
     this.#logger = logger;
+    
+    // Start periodic order store cleanup
+    this.#startOrderStoreCleanup();
     
     // Bind middleware method to preserve context
     this.middleware = this.middleware.bind(this);
@@ -179,6 +202,13 @@ export class TwintClient extends EventEmitter {
           status: order.status.toString(),
           transactionStatus: order.transactionStatus
         }) || console.log('📊 Order status update', order.id.toString());
+      },
+      timeout: (order) => {
+        logger.warn?.('⏰ Payment timeout', {
+          orderId: order.id.toString(),
+          status: order.status.toString(),
+          reason: order.transactionStatus
+        }) || console.log('⏰ Payment timeout', order.id.toString());
       }
     };
 
@@ -400,7 +430,7 @@ export class TwintClient extends EventEmitter {
   }
 
   /**
-   * Start monitoring an order
+   * Start monitoring an order with timeout and circuit breaker
    * @private
    * @param {string} orderId Order ID to monitor
    * @param {Object} initialOrder Initial order data
@@ -417,12 +447,35 @@ export class TwintClient extends EventEmitter {
       return;
     }
 
+    const startTime = Date.now();
     let lastStatus = initialOrder.status?.toString();
+    let errorCount = 0;
+    let currentInterval = this.#monitoringInterval;
+    
+    // Set up monitoring timeout
+    const timeoutId = setTimeout(() => {
+      this.#logger.warn?.(`Order monitoring timeout after ${this.#monitoringTimeout}ms`, { orderId }) ||
+        console.warn(`Order monitoring timeout: ${orderId}`);
+      
+      const timeoutOrder = {
+        ...initialOrder,
+        id: { toString: () => orderId },
+        status: { toString: () => 'TIMEOUT' },
+        transactionStatus: 'MONITORING_TIMEOUT'
+      };
+      
+      this.emit('timeout', timeoutOrder);
+      this.#stopMonitoring(orderId);
+    }, this.#monitoringTimeout);
     
     const intervalId = setInterval(async () => {
       try {
         const order = await this.monitorOrder(orderId);
         const currentStatus = order.status.toString();
+        
+        // Reset error count on successful API call
+        errorCount = 0;
+        currentInterval = this.#monitoringInterval; // Reset to normal interval
         
         // Emit status change if different
         if (currentStatus !== lastStatus) {
@@ -439,12 +492,54 @@ export class TwintClient extends EventEmitter {
           }
         }
       } catch (error) {
-        // Emit error but continue monitoring
+        errorCount++;
+        
+        // Implement exponential backoff for errors
+        currentInterval = Math.min(currentInterval * 1.5, 30000); // Max 30 seconds
+        
+        this.#logger.warn?.(`Monitoring error for order ${orderId} (${errorCount}/${this.#maxMonitoringErrors})`, { 
+          error: error.message,
+          orderId,
+          errorCount 
+        }) || console.warn(`Monitoring error: ${orderId} - ${error.message}`);
+        
+        // Circuit breaker: stop monitoring after max errors
+        if (errorCount >= this.#maxMonitoringErrors) {
+          this.#logger.error?.(`Stopping monitoring for order ${orderId} after ${errorCount} consecutive errors`) ||
+            console.error(`Circuit breaker: Stopping monitoring for ${orderId}`);
+          
+          const errorOrder = {
+            ...initialOrder,
+            id: { toString: () => orderId },
+            status: { toString: () => 'ERROR' },
+            transactionStatus: 'MONITORING_FAILED'
+          };
+          
+          this.emit('error', new Error(`Circuit breaker triggered: ${errorCount} consecutive monitoring errors`), errorOrder);
+          this.#stopMonitoring(orderId);
+          return;
+        }
+        
+        // Emit error but continue monitoring with backoff
         this.emit('error', error, { id: orderId });
+        
+        // Update the metadata for exponential backoff
+        const metadata = this.#monitoringMetadata.get(orderId);
+        if (metadata) {
+          metadata.errorCount = errorCount;
+          metadata.currentInterval = currentInterval;
+        }
       }
-    }, this.#monitoringInterval);
+    }, currentInterval);
     
+    // Store monitoring state
     this.#activeMonitors.set(orderId, intervalId);
+    this.#monitoringMetadata.set(orderId, {
+      startTime,
+      errorCount: 0,
+      timeoutId,
+      currentInterval
+    });
   }
 
   /**
@@ -464,12 +559,20 @@ export class TwintClient extends EventEmitter {
    */
   #stopMonitoring(orderId) {
     const intervalId = this.#activeMonitors.get(orderId);
+    const metadata = this.#monitoringMetadata.get(orderId);
+    
     if (intervalId) {
       clearInterval(intervalId);
       this.#activeMonitors.delete(orderId);
-      return true;
     }
-    return false;
+    
+    if (metadata?.timeoutId) {
+      clearTimeout(metadata.timeoutId);
+    }
+    
+    this.#monitoringMetadata.delete(orderId);
+    
+    return intervalId !== undefined;
   }
 
   /**
@@ -481,13 +584,91 @@ export class TwintClient extends EventEmitter {
   }
 
   /**
-   * Stop all active monitors
+   * Stop all active monitors and cleanup tasks
    */
   stopAllMonitoring() {
-    for (const [orderId, intervalId] of this.#activeMonitors) {
-      clearInterval(intervalId);
+    // Create array of order IDs to avoid modifying collection while iterating
+    const orderIds = Array.from(this.#activeMonitors.keys());
+    
+    for (const orderId of orderIds) {
+      this.#stopMonitoring(orderId); // Use internal method to properly clean up
     }
+    
+    // Ensure everything is cleared
     this.#activeMonitors.clear();
+    this.#monitoringMetadata.clear();
+    
+    // Stop order store cleanup
+    if (this.#cleanupIntervalId) {
+      clearInterval(this.#cleanupIntervalId);
+      this.#cleanupIntervalId = null;
+    }
+  }
+
+  /**
+   * Start periodic order store cleanup
+   * @private
+   */
+  #startOrderStoreCleanup() {
+    // Run cleanup every hour
+    const cleanupInterval = 60 * 60 * 1000; // 1 hour
+    
+    // Store the cleanup interval ID for potential cleanup on shutdown
+    this.#cleanupIntervalId = setInterval(() => {
+      this.#cleanupOrderStore();
+    }, cleanupInterval);
+  }
+
+  /**
+   * Clean up old orders from the order store
+   * @private
+   */
+  #cleanupOrderStore() {
+    const now = Date.now();
+    let cleanedCount = 0;
+    
+    for (const [orderId, order] of this.#orderStore.entries()) {
+      const orderAge = now - new Date(order.lastUpdated || order.createdAt || 0).getTime();
+      
+      if (orderAge > this.#orderStoreTTL) {
+        this.#orderStore.delete(orderId);
+        cleanedCount++;
+      }
+    }
+    
+    if (cleanedCount > 0) {
+      this.#logger.debug?.(`Cleaned up ${cleanedCount} old orders from store`) ||
+        console.log(`Order store cleanup: removed ${cleanedCount} old orders`);
+    }
+  }
+
+  /**
+   * Get monitoring statistics
+   * @returns {Object} Monitoring statistics
+   */
+  getMonitoringStats() {
+    const stats = {
+      activeMonitors: this.#activeMonitors.size,
+      maxConcurrentMonitors: this.#maxConcurrentMonitors,
+      ordersInStore: this.#orderStore.size,
+      monitoringTimeout: this.#monitoringTimeout,
+      maxMonitoringErrors: this.#maxMonitoringErrors,
+      orderStoreTTL: this.#orderStoreTTL,
+      monitoringDetails: []
+    };
+
+    // Add details for each active monitor
+    for (const [orderId, metadata] of this.#monitoringMetadata) {
+      const duration = Date.now() - metadata.startTime;
+      stats.monitoringDetails.push({
+        orderId,
+        duration,
+        errorCount: metadata.errorCount,
+        currentInterval: metadata.currentInterval
+      });
+    }
+
+    return stats;
   }
 
   /**
@@ -495,11 +676,11 @@ export class TwintClient extends EventEmitter {
    * @param {Object} params
    * @param {string|import('../values/MerchantTransactionReference.js').UnfiledMerchantTransactionReference} params.reference
    * @param {import('../values/Money.js').Money} params.amount
-   * @param {boolean} [params.confirmationNeeded=true]
+   * @param {boolean} [params.confirmationNeeded=false]
    * @param {boolean} [params.autoMonitor=true] Automatically start monitoring the order
    * @returns {Promise<Object>}
    */
-  async startOrder({ reference, amount, confirmationNeeded = true, autoMonitor = true }) {
+  async startOrder({ reference, amount, confirmationNeeded = false, autoMonitor = true }) {
     try {
       const merchantRef = typeof reference === 'string' ? reference : reference.value;
 
@@ -941,6 +1122,8 @@ export class TwintClient extends EventEmitter {
       updatedOrder.completedAt = new Date().toISOString();
     } else if (status === 'CANCELLED') {
       updatedOrder.cancelledAt = new Date().toISOString();
+    } else if (status === 'TIMEOUT') {
+      updatedOrder.timedOutAt = new Date().toISOString();
     }
     
     this.#orderStore.set(orderId, updatedOrder);
@@ -952,7 +1135,7 @@ export class TwintClient extends EventEmitter {
    */
   async #handleStartOrder(req, res) {
     try {
-      const { reference, amount, confirmationNeeded = true } = req.body;
+      const { reference, amount, confirmationNeeded = false } = req.body;
 
       if (!reference || !amount || amount <= 0) {
         return res.status(400).json({
